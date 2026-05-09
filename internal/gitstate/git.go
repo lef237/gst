@@ -1,0 +1,300 @@
+package gitstate
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+type Options struct {
+	LogLimit int
+}
+
+type State struct {
+	RepoRoot string
+	Head     string
+	Branch   string
+	Detached bool
+	Upstream string
+	Ahead    int
+	Behind   int
+
+	Files    []File
+	Counts   Counts
+	Graph    []string
+	Refs     []Ref
+	Remotes  []Remote
+	Stashes  []Stash
+	Warnings []string
+}
+
+type Counts struct {
+	Staged     int
+	Modified   int
+	Untracked  int
+	Conflicted int
+}
+
+type File struct {
+	Status string
+	Path   string
+	Kind   string
+}
+
+type Ref struct {
+	Name     string
+	Hash     string
+	Age      string
+	Upstream string
+	Remote   bool
+	Current  bool
+}
+
+type Remote struct {
+	Name string
+	URL  string
+	Kind string
+}
+
+type Stash struct {
+	Name    string
+	Age     string
+	Message string
+}
+
+func Collect(ctx context.Context, dir string, opts Options) (State, error) {
+	if opts.LogLimit <= 0 {
+		opts.LogLimit = 18
+	}
+
+	root, err := git(ctx, dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return State{}, errors.New("not a git repository")
+	}
+	root = strings.TrimSpace(root)
+
+	state := State{RepoRoot: root}
+	if out, err := git(ctx, root, "status", "--porcelain=v2", "--branch"); err == nil {
+		parseStatus(out, &state)
+	} else {
+		state.Warnings = append(state.Warnings, err.Error())
+	}
+
+	if out, err := git(ctx, root, "log", "--graph", "--decorate", "--oneline", "--all", "--date-order", "-n", strconv.Itoa(opts.LogLimit)); err == nil {
+		state.Graph = nonEmptyLines(out)
+	} else {
+		state.Warnings = append(state.Warnings, err.Error())
+	}
+
+	if out, err := git(ctx, root, "for-each-ref", "refs/heads", "refs/remotes", "--format=%(refname:short)|%(objectname:short)|%(committerdate:relative)|%(upstream:short)"); err == nil {
+		state.Refs = parseRefs(out, state.Branch)
+	} else {
+		state.Warnings = append(state.Warnings, err.Error())
+	}
+
+	if out, err := git(ctx, root, "remote", "-v"); err == nil {
+		state.Remotes = parseRemotes(out)
+	} else {
+		state.Warnings = append(state.Warnings, err.Error())
+	}
+
+	if out, err := git(ctx, root, "stash", "list", "--date=relative", "--pretty=format:%gd|%cr|%s"); err == nil {
+		state.Stashes = parseStashes(out)
+	} else {
+		state.Warnings = append(state.Warnings, err.Error())
+	}
+
+	return state, nil
+}
+
+func parseStatus(out string, state *State) {
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "# ") {
+			parseHeader(line, state)
+			continue
+		}
+		switch line[0] {
+		case '1', '2':
+			parseTracked(line, state)
+		case 'u':
+			parseUnmerged(line, state)
+		case '?':
+			path := strings.TrimSpace(strings.TrimPrefix(line, "?"))
+			state.Files = append(state.Files, File{Status: "??", Path: path, Kind: "untracked"})
+			state.Counts.Untracked++
+		}
+	}
+}
+
+func parseHeader(line string, state *State) {
+	fields := strings.Fields(line)
+	if len(fields) < 3 {
+		return
+	}
+	switch fields[1] {
+	case "branch.oid":
+		state.Head = shortHash(fields[2])
+	case "branch.head":
+		if fields[2] == "(detached)" {
+			state.Detached = true
+			state.Branch = "DETACHED"
+		} else {
+			state.Branch = fields[2]
+		}
+	case "branch.upstream":
+		state.Upstream = fields[2]
+	case "branch.ab":
+		for _, f := range fields[2:] {
+			if strings.HasPrefix(f, "+") {
+				state.Ahead, _ = strconv.Atoi(strings.TrimPrefix(f, "+"))
+			}
+			if strings.HasPrefix(f, "-") {
+				state.Behind, _ = strconv.Atoi(strings.TrimPrefix(f, "-"))
+			}
+		}
+	}
+}
+
+func parseTracked(line string, state *State) {
+	fields := strings.Fields(line)
+	if len(fields) < 9 {
+		return
+	}
+	xy := fields[1]
+	path := fields[len(fields)-1]
+	if line[0] == '2' && len(fields) >= 10 {
+		path = fields[len(fields)-2] + " -> " + fields[len(fields)-1]
+	}
+	kind := classifyXY(xy)
+	state.Files = append(state.Files, File{Status: xy, Path: path, Kind: kind})
+	if xy[0] != '.' {
+		state.Counts.Staged++
+	}
+	if xy[1] != '.' {
+		state.Counts.Modified++
+	}
+}
+
+func parseUnmerged(line string, state *State) {
+	fields := strings.Fields(line)
+	if len(fields) < 11 {
+		return
+	}
+	state.Files = append(state.Files, File{Status: fields[1], Path: fields[len(fields)-1], Kind: "conflict"})
+	state.Counts.Conflicted++
+}
+
+func classifyXY(xy string) string {
+	if len(xy) != 2 {
+		return "changed"
+	}
+	if strings.ContainsAny(xy, "U") {
+		return "conflict"
+	}
+	if xy[0] != '.' && xy[1] != '.' {
+		return "staged+worktree"
+	}
+	if xy[0] != '.' {
+		return "staged"
+	}
+	if xy[1] != '.' {
+		return "worktree"
+	}
+	return "clean"
+}
+
+func parseRefs(out, current string) []Ref {
+	var refs []Ref
+	for _, line := range nonEmptyLines(out) {
+		parts := strings.Split(line, "|")
+		for len(parts) < 4 {
+			parts = append(parts, "")
+		}
+		name := parts[0]
+		if strings.HasSuffix(name, "/HEAD") || name == "origin" {
+			continue
+		}
+		refs = append(refs, Ref{
+			Name:     name,
+			Hash:     parts[1],
+			Age:      parts[2],
+			Upstream: parts[3],
+			Remote:   strings.Contains(name, "/"),
+			Current:  name == current,
+		})
+	}
+	sort.SliceStable(refs, func(i, j int) bool {
+		if refs[i].Current != refs[j].Current {
+			return refs[i].Current
+		}
+		if refs[i].Remote != refs[j].Remote {
+			return !refs[i].Remote
+		}
+		return refs[i].Name < refs[j].Name
+	})
+	return refs
+}
+
+func parseRemotes(out string) []Remote {
+	seen := map[string]bool{}
+	var remotes []Remote
+	for _, line := range nonEmptyLines(out) {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		key := fields[0] + "|" + fields[1] + "|" + strings.Trim(fields[2], "()")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		remotes = append(remotes, Remote{Name: fields[0], URL: fields[1], Kind: strings.Trim(fields[2], "()")})
+	}
+	return remotes
+}
+
+func parseStashes(out string) []Stash {
+	var stashes []Stash
+	for _, line := range nonEmptyLines(out) {
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		stashes = append(stashes, Stash{Name: parts[0], Age: parts[1], Message: parts[2]})
+	}
+	return stashes
+}
+
+func git(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+func nonEmptyLines(out string) []string {
+	var lines []string
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func shortHash(s string) string {
+	if len(s) > 7 {
+		return s[:7]
+	}
+	return s
+}
