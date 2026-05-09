@@ -35,13 +35,14 @@ go build -o ~/tmp/gst ./cmd/gst
 
 ```sh
 gst
-gst --watch
-gst --watch --interval 1s
+gst --interval 1s
+gst --once
 gst --no-color
 ```
 
-In `--watch` mode, use `tab` to move between views, `1`-`5` to jump directly,
-`r` to refresh, and `q` to quit. The available views are:
+By default, `gst` opens the interactive TUI. Use `tab` to move between views,
+`1`-`5` to jump directly, `r` to refresh, and `q` to quit. The available views
+are:
 
 - `overview`
 - `graph`

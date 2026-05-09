@@ -17,8 +17,8 @@ import (
 
 func main() {
 	var (
-		watch    = flag.Bool("watch", false, "refresh the dashboard continuously")
-		interval = flag.Duration("interval", 2*time.Second, "refresh interval for --watch")
+		once     = flag.Bool("once", false, "print one snapshot and exit")
+		interval = flag.Duration("interval", 2*time.Second, "refresh interval for the TUI")
 		noColor  = flag.Bool("no-color", false, "disable ANSI colors")
 		logLimit = flag.Int("log", 18, "number of commits to show in the graph")
 		version  = flag.Bool("version", false, "print version and exit")
@@ -34,7 +34,7 @@ func main() {
 	width, height := terminalSize()
 	opts := gitstate.Options{LogLimit: *logLimit}
 
-	if !*watch {
+	if *once {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		printOnce(ctx, opts, ui.Options{Color: color, Width: width, Height: height})
