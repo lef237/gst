@@ -20,7 +20,7 @@ func main() {
 		once     = flag.Bool("once", false, "print one snapshot and exit")
 		interval = flag.Duration("interval", 2*time.Second, "refresh interval for the TUI")
 		noColor  = flag.Bool("no-color", false, "disable ANSI colors")
-		logLimit = flag.Int("log", 18, "number of commits to show in the graph")
+		logLimit = flag.Int("log", 200, "number of commits to keep available in the graph")
 		version  = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
@@ -60,18 +60,54 @@ func main() {
 	active := ui.TabOverview
 	nativeStatus := false
 	graphAll := false
+	diffStaged := false
+	scrolls := map[ui.Tab]int{}
+	var state gitstate.State
+	stateReady := false
+	nativeOutput := ""
+	nativeReady := false
+	needsRefresh := true
 	lastFrame := ""
 	forceDraw := true
 
 	for {
 		width, height = terminalSize()
-		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		frame, err := renderFrame(refreshCtx, active, nativeStatus, opts, ui.Options{Color: color, Width: width, Height: height, Interactive: true, GraphAll: graphAll})
-		cancel()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "gst: %v\n", err)
-			return
+		renderOpts := ui.Options{Color: color, Width: width, Height: height, Interactive: true, GraphAll: graphAll, DiffStaged: diffStaged, Scroll: scrolls[active]}
+		frame := ""
+		if nativeStatus {
+			if needsRefresh || !nativeReady {
+				refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				status, err := gitstate.NativeStatus(refreshCtx, ".", renderOpts.Color)
+				cancel()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "gst: %v\n", err)
+					return
+				}
+				nativeOutput = status
+				nativeReady = true
+			}
+			frame = ui.RenderNativeStatus(nativeOutput, renderOpts)
+		} else {
+			if needsRefresh || !stateReady {
+				refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				collectOpts := opts
+				collectOpts.GraphAll = graphAll
+				nextState, err := gitstate.Collect(refreshCtx, ".", collectOpts)
+				cancel()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "gst: %v\n", err)
+					return
+				}
+				state = nextState
+				stateReady = true
+			}
+			if canScroll(active, nativeStatus) {
+				scrolls[active] = min(scrolls[active], ui.MaxScroll(state, active, renderOpts))
+				renderOpts.Scroll = scrolls[active]
+			}
+			frame = ui.RenderTab(state, active, renderOpts)
 		}
+		needsRefresh = false
 		if forceDraw || frame != lastFrame {
 			drawFrame(frame)
 			lastFrame = frame
@@ -96,16 +132,68 @@ func main() {
 				active = previousTab(active)
 				nativeStatus = false
 				forceDraw = true
+			case "down", "j", "J":
+				if canScroll(active, nativeStatus) {
+					scrolls[active]++
+					forceDraw = true
+				}
+			case "up", "k", "K":
+				if canScroll(active, nativeStatus) {
+					scrolls[active] = max(0, scrolls[active]-1)
+					forceDraw = true
+				}
+			case "pagedown", "f", "F":
+				if canScroll(active, nativeStatus) {
+					scrolls[active] += pageStep(height)
+					forceDraw = true
+				}
+			case "pageup", "b", "B":
+				if canScroll(active, nativeStatus) {
+					scrolls[active] = max(0, scrolls[active]-pageStep(height))
+					forceDraw = true
+				}
+			case "d", "D":
+				if canScroll(active, nativeStatus) {
+					scrolls[active] += halfPageStep(height)
+					forceDraw = true
+				}
+			case "u", "U":
+				if canScroll(active, nativeStatus) {
+					scrolls[active] = max(0, scrolls[active]-halfPageStep(height))
+					forceDraw = true
+				}
+			case "home":
+				if canScroll(active, nativeStatus) {
+					scrolls[active] = 0
+					forceDraw = true
+				}
+			case "end":
+				if canScroll(active, nativeStatus) {
+					scrolls[active] = 1 << 30
+					forceDraw = true
+				}
 			case "?":
 				nativeStatus = false
 				active = ui.TabHelp
 				forceDraw = true
 			case "t", "T":
 				nativeStatus = !nativeStatus
+				if nativeStatus && !nativeReady {
+					needsRefresh = true
+				}
 				forceDraw = true
 			case "a", "A":
 				if active == ui.TabGraph && !nativeStatus {
 					graphAll = !graphAll
+					scrolls[ui.TabGraph] = 0
+					stateReady = false
+					needsRefresh = true
+					forceDraw = true
+				}
+			case "s", "S":
+				if active == ui.TabDiff && !nativeStatus {
+					diffStaged = !diffStaged
+					scrolls[ui.TabDiff] = 0
 					forceDraw = true
 				}
 			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
@@ -116,9 +204,13 @@ func main() {
 					forceDraw = true
 				}
 			case "r", "R":
+				needsRefresh = true
+				nativeReady = false
+				stateReady = false
 				forceDraw = true
 			}
 		case <-ticker.C:
+			needsRefresh = true
 		}
 	}
 }
@@ -132,22 +224,23 @@ func printOnce(ctx context.Context, opts gitstate.Options, render ui.Options) {
 	fmt.Print(ui.Render(state, render))
 }
 
-func renderTab(ctx context.Context, tab ui.Tab, opts gitstate.Options, render ui.Options) (string, error) {
+func renderTab(ctx context.Context, tab ui.Tab, opts gitstate.Options, render ui.Options) (string, int, error) {
 	opts.GraphAll = render.GraphAll
 	state, err := gitstate.Collect(ctx, ".", opts)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return ui.RenderTab(state, tab, render), nil
+	render.Scroll = min(render.Scroll, ui.MaxScroll(state, tab, render))
+	return ui.RenderTab(state, tab, render), render.Scroll, nil
 }
 
-func renderFrame(ctx context.Context, tab ui.Tab, native bool, opts gitstate.Options, render ui.Options) (string, error) {
+func renderFrame(ctx context.Context, tab ui.Tab, native bool, opts gitstate.Options, render ui.Options) (string, int, error) {
 	if native {
 		status, err := gitstate.NativeStatus(ctx, ".", render.Color)
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
-		return ui.RenderNativeStatus(status, render), nil
+		return ui.RenderNativeStatus(status, render), 0, nil
 	}
 	return renderTab(ctx, tab, opts, render)
 }
@@ -164,6 +257,21 @@ func previousTab(active ui.Tab) ui.Tab {
 		return ui.Tab(len(ui.Tabs()) - 1)
 	}
 	return active - 1
+}
+
+func canScroll(active ui.Tab, native bool) bool {
+	if native {
+		return false
+	}
+	return active == ui.TabGraph || active == ui.TabDiff
+}
+
+func pageStep(height int) int {
+	return max(1, height-6)
+}
+
+func halfPageStep(height int) int {
+	return max(1, pageStep(height)/2)
 }
 
 func terminalSize() (int, int) {
@@ -216,6 +324,20 @@ func isTerminal(f *os.File) bool {
 
 func maxDuration(a, b time.Duration) time.Duration {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
 		return a
 	}
 	return b
@@ -315,10 +437,30 @@ func parseKey(reader *bufio.Reader, b byte) (string, error) {
 		return "", err
 	}
 	switch final {
+	case 'A':
+		return "up", nil
+	case 'B':
+		return "down", nil
 	case 'C':
 		return "right", nil
 	case 'D':
 		return "left", nil
+	case 'F':
+		return "end", nil
+	case 'H':
+		return "home", nil
+	case '5', '6':
+		tilde, err := reader.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		if tilde != '~' {
+			return "", nil
+		}
+		if final == '5' {
+			return "pageup", nil
+		}
+		return "pagedown", nil
 	default:
 		return "", nil
 	}

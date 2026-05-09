@@ -50,8 +50,12 @@ func TestParseKeyDecodesArrowKeys(t *testing.T) {
 		input string
 		want  string
 	}{
+		{input: "\x1b[A", want: "up"},
+		{input: "\x1b[B", want: "down"},
 		{input: "\x1b[C", want: "right"},
 		{input: "\x1b[D", want: "left"},
+		{input: "\x1b[5~", want: "pageup"},
+		{input: "\x1b[6~", want: "pagedown"},
 		{input: "\x1bOC", want: "right"},
 		{input: "\x1bOD", want: "left"},
 		{input: "q", want: "q"},

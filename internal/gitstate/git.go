@@ -26,14 +26,17 @@ type State struct {
 	Ahead    int
 	Behind   int
 
-	Files     []File
-	Counts    Counts
-	Graph     []string
-	Refs      []Ref
-	Remotes   []Remote
-	Stashes   []Stash
-	Warnings  []string
-	Operation Operation
+	Files        []File
+	Counts       Counts
+	Diff         []string
+	StagedDiff   []string
+	WorktreeDiff []string
+	Graph        []string
+	Refs         []Ref
+	Remotes      []Remote
+	Stashes      []Stash
+	Warnings     []string
+	Operation    Operation
 }
 
 type Counts struct {
@@ -102,6 +105,14 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 		state.Warnings = append(state.Warnings, err.Error())
 	}
 
+	if staged, worktree, err := collectDiffs(ctx, root); err == nil {
+		state.StagedDiff = diffLines(staged)
+		state.WorktreeDiff = diffLines(worktree)
+		state.Diff = combineDiffs(state.StagedDiff, state.WorktreeDiff)
+	} else {
+		state.Warnings = append(state.Warnings, err.Error())
+	}
+
 	if out, err := git(ctx, root, "for-each-ref", "refs/heads", "refs/remotes", "--format=%(refname:short)|%(objectname:short)|%(committerdate:relative)|%(upstream:short)"); err == nil {
 		state.Refs = parseRefs(out, state.Branch)
 	} else {
@@ -141,6 +152,18 @@ func collectGraph(ctx context.Context, root string, limit int, all bool) (string
 	args := []string{"log", "--graph", "--decorate", "--oneline", "--date-order", "-n", strconv.Itoa(limit)}
 	args = append(args, refs...)
 	return git(ctx, root, args...)
+}
+
+func collectDiffs(ctx context.Context, root string) (string, string, error) {
+	cached, err := git(ctx, root, "diff", "--cached", "--no-ext-diff", "--unified=3")
+	if err != nil {
+		return "", "", err
+	}
+	worktree, err := git(ctx, root, "diff", "--no-ext-diff", "--unified=3")
+	if err != nil {
+		return "", "", err
+	}
+	return cached, worktree, nil
 }
 
 func NativeStatus(ctx context.Context, dir string, color bool) (string, error) {
@@ -400,6 +423,29 @@ func nonEmptyLines(out string) []string {
 		if strings.TrimSpace(line) != "" {
 			lines = append(lines, line)
 		}
+	}
+	return lines
+}
+
+func diffLines(out string) []string {
+	if strings.TrimSpace(out) == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(out, "\n"), "\n")
+}
+
+func combineDiffs(staged, worktree []string) []string {
+	var lines []string
+	if len(staged) > 0 {
+		lines = append(lines, "staged diff")
+		lines = append(lines, staged...)
+	}
+	if len(worktree) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "worktree diff")
+		lines = append(lines, worktree...)
 	}
 	return lines
 }

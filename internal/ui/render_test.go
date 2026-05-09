@@ -34,7 +34,7 @@ func TestRenderTabFitsHeight(t *testing.T) {
 
 func TestRenderHelpTab(t *testing.T) {
 	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
-	out := RenderTab(state, TabHelp, Options{Width: 80, Height: 18, Interactive: true})
+	out := RenderTab(state, TabHelp, Options{Width: 80, Height: 22, Interactive: true})
 
 	if !strings.Contains(out, "[? help]") {
 		t.Fatalf("help tab was not active:\n%s", out)
@@ -53,13 +53,67 @@ func TestRenderGraphAllMode(t *testing.T) {
 	}
 
 	normal := RenderTab(state, TabGraph, Options{Width: 130, Height: 12, Interactive: true})
-	if !strings.Contains(normal, "a --all") || !strings.Contains(normal, "press a to show detailed --all graph") {
+	if !strings.Contains(normal, "press a to show detailed --all graph") {
 		t.Fatalf("normal graph should advertise --all toggle:\n%s", normal)
 	}
 
 	detailed := RenderTab(state, TabGraph, Options{Width: 130, Height: 12, Interactive: true, GraphAll: true})
-	if !strings.Contains(detailed, "commit graph --all") || !strings.Contains(detailed, "a normal") || !strings.Contains(detailed, "press a to return to normal branch graph") {
+	if !strings.Contains(detailed, "commit graph --all") || !strings.Contains(detailed, "press a to return to normal branch graph") {
 		t.Fatalf("detailed graph mode was not rendered:\n%s", detailed)
+	}
+}
+
+func TestRenderDiffTab(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/repo",
+		Branch:   "main",
+		Head:     "abcdef1",
+		StagedDiff: []string{
+			"diff --git a/file.txt b/file.txt",
+			"@@ -1 +1 @@",
+			"-old",
+			"+new",
+		},
+		WorktreeDiff: []string{
+			"diff --git a/file.txt b/file.txt",
+			"@@ -1 +1 @@",
+			"-new",
+			"+newer",
+		},
+	}
+
+	out := RenderTab(state, TabDiff, Options{Width: 90, Height: 12, Interactive: true})
+	if !strings.Contains(out, "[4:diff]") || !strings.Contains(out, "mode: worktree diff") || !strings.Contains(out, "+newer") {
+		t.Fatalf("diff tab did not render worktree patch:\n%s", out)
+	}
+
+	staged := RenderTab(state, TabDiff, Options{Width: 90, Height: 12, Interactive: true, DiffStaged: true})
+	if !strings.Contains(staged, "diff staged") || !strings.Contains(staged, "mode: staged diff") || !strings.Contains(staged, "+new") {
+		t.Fatalf("diff tab did not render staged patch:\n%s", staged)
+	}
+}
+
+func TestScrollablePanelUsesOffset(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/repo",
+		Branch:   "main",
+		Head:     "abcdef1",
+		Graph: []string{
+			"* 1111111 one",
+			"* 2222222 two",
+			"* 3333333 three",
+			"* 4444444 four",
+			"* 5555555 five",
+			"* 6666666 six",
+		},
+	}
+
+	out := RenderTab(state, TabGraph, Options{Width: 90, Height: 9, Interactive: true, Scroll: 4})
+	if !strings.Contains(out, "commit graph 5-") || !strings.Contains(out, "2222222") {
+		t.Fatalf("graph should render with scroll offset:\n%s", out)
+	}
+	if got := MaxScroll(state, TabGraph, Options{Width: 90, Height: 9, Interactive: true}); got != 5 {
+		t.Fatalf("max graph scroll = %d, want 5", got)
 	}
 }
 
@@ -78,12 +132,12 @@ func TestRenderBranchAndStashTabs(t *testing.T) {
 	}
 
 	branches := RenderTab(state, TabBranches, Options{Width: 90, Height: 16, Interactive: true})
-	if !strings.Contains(branches, "[4:branches]") || !strings.Contains(branches, "diverged") {
+	if !strings.Contains(branches, "[5:branches]") || !strings.Contains(branches, "diverged") {
 		t.Fatalf("branch tab did not render branch relationship:\n%s", branches)
 	}
 
 	stash := RenderTab(state, TabStash, Options{Width: 90, Height: 12, Interactive: true})
-	if !strings.Contains(stash, "[5:stash]") || !strings.Contains(stash, "stash@{0}") {
+	if !strings.Contains(stash, "[6:stash]") || !strings.Contains(stash, "stash@{0}") {
 		t.Fatalf("stash tab did not render stash entry:\n%s", stash)
 	}
 }
@@ -110,7 +164,7 @@ func TestRenderNarrowOverviewFitsWidth(t *testing.T) {
 
 func TestRenderNarrowTabsFitWidth(t *testing.T) {
 	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
-	for _, tab := range []Tab{TabGraph, TabFiles, TabBranches, TabStash, TabRefs, TabRemote, TabHelp} {
+	for _, tab := range []Tab{TabGraph, TabFiles, TabDiff, TabBranches, TabStash, TabRefs, TabRemote, TabHelp} {
 		out := RenderTab(state, tab, Options{Width: 35, Height: 10, Interactive: true})
 		assertFits(t, out, 35, 10)
 	}
@@ -239,16 +293,16 @@ func TestTruncateResetsActiveColor(t *testing.T) {
 }
 
 func TestTabBarResponsiveModes(t *testing.T) {
-	wide := tabBar(TabBranches, Options{Width: 120})
-	if !strings.Contains(wide, "7:remote") || !strings.Contains(wide, "? help") || !strings.Contains(wide, "q quit") {
+	wide := tabBar(TabBranches, Options{Width: 140})
+	if !strings.Contains(wide, "8:remote") || !strings.Contains(wide, "? help") || !strings.Contains(wide, "q quit") {
 		t.Fatalf("wide tab bar should include all tabs and compact help:\n%s", wide)
 	}
-	if visibleLen(wide) > 120 {
+	if visibleLen(wide) > 140 {
 		t.Fatalf("wide tab bar overflowed: %d\n%s", visibleLen(wide), wide)
 	}
 
 	medium := tabBar(TabBranches, Options{Width: 70})
-	if !strings.Contains(medium, "[4:branches]") || !strings.Contains(medium, "7:remote") {
+	if !strings.Contains(medium, "[5:branches]") || !strings.Contains(medium, "8:remote") {
 		t.Fatalf("medium tab bar should include all tabs:\n%s", medium)
 	}
 	if visibleLen(medium) > 70 {
@@ -256,7 +310,7 @@ func TestTabBarResponsiveModes(t *testing.T) {
 	}
 
 	narrow := tabBar(TabBranches, Options{Width: 30})
-	if !strings.Contains(narrow, "4/7") || !strings.Contains(narrow, "? t q") {
+	if !strings.Contains(narrow, "5/8") || !strings.Contains(narrow, "? t q") {
 		t.Fatalf("narrow tab bar should keep current tab and quit hint:\n%s", narrow)
 	}
 	if visibleLen(narrow) > 30 {

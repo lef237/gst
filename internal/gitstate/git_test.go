@@ -111,6 +111,35 @@ func TestCollectGraphAllIncludesStashInternals(t *testing.T) {
 	}
 }
 
+func TestCollectDiffIncludesStagedAndWorktreeDiffs(t *testing.T) {
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-qm", "initial")
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "file.txt")
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("three\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := strings.Join(state.Diff, "\n")
+	for _, want := range []string{"staged diff", "worktree diff", "-one", "+two", "-two", "+three"} {
+		if !strings.Contains(diff, want) {
+			t.Fatalf("diff missing %q:\n%s", want, diff)
+		}
+	}
+}
+
 func initRepoWithStash(t *testing.T) string {
 	t.Helper()
 	root := initTestRepo(t)

@@ -16,6 +16,8 @@ type Options struct {
 	Height      int
 	Interactive bool
 	GraphAll    bool
+	DiffStaged  bool
+	Scroll      int
 }
 
 type Tab int
@@ -24,6 +26,7 @@ const (
 	TabOverview Tab = iota
 	TabGraph
 	TabFiles
+	TabDiff
 	TabBranches
 	TabStash
 	TabRefs
@@ -32,7 +35,7 @@ const (
 )
 
 func Tabs() []string {
-	return []string{"overview", "graph", "files", "branches", "stash", "refs", "remote"}
+	return []string{"overview", "graph", "files", "diff", "branches", "stash", "refs", "remote"}
 }
 
 func Render(state gitstate.State, opts Options) string {
@@ -40,12 +43,7 @@ func Render(state gitstate.State, opts Options) string {
 }
 
 func RenderTab(state gitstate.State, active Tab, opts Options) string {
-	if opts.Width < 30 {
-		opts.Width = 30
-	}
-	if opts.Height < 8 {
-		opts.Height = 8
-	}
+	opts = normalizeOptions(opts)
 
 	var out strings.Builder
 	out.WriteString(header(state, opts))
@@ -67,9 +65,15 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 		if opts.GraphAll {
 			title = "commit graph --all"
 		}
-		out.WriteString(panel(title, graphTabLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		out.WriteString(scrollPanel(title, graphTabLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabFiles:
 		out.WriteString(panel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+	case TabDiff:
+		title := "diff worktree"
+		if opts.DiffStaged {
+			title = "diff staged"
+		}
+		out.WriteString(scrollPanel(title, diffLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabBranches:
 		out.WriteString(panel("branches", branchLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabStash:
@@ -86,18 +90,43 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 	return trimToHeight(out.String(), opts.Height)
 }
 
+func MaxScroll(state gitstate.State, active Tab, opts Options) int {
+	opts = normalizeOptions(opts)
+	bodyHeight := opts.Height - 2
+	if opts.Interactive {
+		bodyHeight = opts.Height - 4
+	}
+	if bodyHeight < 6 {
+		bodyHeight = 6
+	}
+	rows := bodyHeight - 2
+	switch active {
+	case TabGraph:
+		return max(0, len(graphTabLines(state, opts.Width-4, opts))-rows)
+	case TabDiff:
+		return max(0, len(diffLines(state, opts.Width-4, opts))-rows)
+	default:
+		return 0
+	}
+}
+
 func RenderNativeStatus(status string, opts Options) string {
+	opts = normalizeOptions(opts)
+	var out strings.Builder
+	out.WriteString(nativeStatusBar(opts))
+	out.WriteString("\n")
+	out.WriteString(panel("git status", nativeStatusLines(status), opts.Width, opts.Height-2, opts))
+	return trimToHeight(out.String(), opts.Height)
+}
+
+func normalizeOptions(opts Options) Options {
 	if opts.Width < 30 {
 		opts.Width = 30
 	}
 	if opts.Height < 8 {
 		opts.Height = 8
 	}
-	var out strings.Builder
-	out.WriteString(nativeStatusBar(opts))
-	out.WriteString("\n")
-	out.WriteString(panel("git status", nativeStatusLines(status), opts.Width, opts.Height-2, opts))
-	return trimToHeight(out.String(), opts.Height)
+	return opts
 }
 
 func overview(state gitstate.State, opts Options, bodyHeight int) string {
@@ -170,12 +199,14 @@ func tabBar(active Tab, opts Options) string {
 	}
 
 	line := strings.Join(parts, " ")
-	compactHelp := " ? help  t git-status  r refresh  q quit"
+	compactHelp := " arrows/tab tabs  ? help  t git-status  r refresh  q quit"
 	if active == TabGraph {
-		compactHelp = " left/right  ? help  a --all  t git-status  r refresh  q quit"
+		compactHelp = " f/b page  d/u half  j/k line  a --all  ? help  q quit"
 		if opts.GraphAll {
-			compactHelp = " left/right  ? help  a normal  t git-status  r refresh  q quit"
+			compactHelp = " f/b page  d/u half  j/k line  a normal  ? help  q quit"
 		}
+	} else if active == TabDiff {
+		compactHelp = " s staged/worktree  f/b page  d/u half  j/k line  ? help  q quit"
 	}
 	if visibleLen(line)+visibleLen(compactHelp) <= opts.Width {
 		return line + color(opts, compactHelp, dim)
@@ -190,7 +221,9 @@ func tabBar(active Tab, opts Options) string {
 func compactTabBar(active Tab, tabs []string, opts Options) string {
 	controls := " tab arrows ? t q"
 	if active == TabGraph {
-		controls = " tab arrows ? a t q"
+		controls = " f/b d/u j/k ? a q"
+	} else if active == TabDiff {
+		controls = " s f/b d/u j/k ? q"
 	}
 	prefix := fmt.Sprintf("[%d/%d ", int(active)+1, len(tabs))
 	suffix := "]"
@@ -203,7 +236,7 @@ func compactTabBar(active Tab, tabs []string, opts Options) string {
 }
 
 func helpTabBar(opts Options) string {
-	line := "1:overview 2:graph 3:files 4:branches 5:stash 6:refs 7:remote [? help]"
+	line := "1:overview 2:graph 3:files 4:diff 5:branches 6:stash 7:refs 8:remote [? help]"
 	if visibleLen(line) <= opts.Width {
 		controls := " tab back  q quit"
 		if visibleLen(line)+len(controls) <= opts.Width {
@@ -395,6 +428,29 @@ func graphTabLines(state gitstate.State, width int, opts Options) []string {
 	return append(lines, graphLines(state, width, opts)...)
 }
 
+func diffLines(state gitstate.State, width int, opts Options) []string {
+	diff := state.WorktreeDiff
+	mode := "worktree"
+	next := "staged"
+	if opts.DiffStaged {
+		diff = state.StagedDiff
+		mode = "staged"
+		next = "worktree"
+	}
+	if len(diff) == 0 {
+		return []string{color(opts, fmt.Sprintf("no %s diff", mode), green), color(opts, fmt.Sprintf("press s to show %s diff", next), dim)}
+	}
+	lines := make([]string, 0, len(diff)+2)
+	lines = append(lines,
+		color(opts, fmt.Sprintf("mode: %s diff, press s to show %s diff", mode, next), cyanBold),
+		color(opts, "j/k line, d/u half page, f/b page", dim),
+	)
+	for _, line := range diff {
+		lines = append(lines, colorDiffLine(truncate(expandTabs(line, 8), width), opts))
+	}
+	return lines
+}
+
 func fileLines(state gitstate.State, width int, opts Options) []string {
 	if len(state.Files) == 0 {
 		return []string{color(opts, "no file changes", green)}
@@ -582,7 +638,12 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"tab       move to the next view",
 		"right     move to the next view",
 		"left      move to the previous view",
-		"1-7       jump to a view directly",
+		"j/k       scroll graph and diff by one line",
+		"d/u       scroll graph and diff by half a page",
+		"f/b       scroll graph and diff by one page",
+		"page keys scroll graph and diff by one page",
+		"s         toggle staged/worktree diff on diff view",
+		"1-8       jump to a view directly",
 		"?         open this help view",
 		"t         toggle native git status",
 		"a         toggle --all detail mode on graph view",
@@ -593,6 +654,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"overview  sync, workspace, changed files, and recent graph",
 		"graph     normal graph; press a for detailed --all graph",
 		"files     index and worktree changes",
+		"diff      current staged and worktree patch",
 		"branches  current branch, upstream, and branch relationships",
 		"stash     temporary saved work outside the current branch",
 		"refs      local and remote refs",
@@ -646,6 +708,38 @@ func panel(title string, lines []string, width, maxHeight int, opts Options) str
 	}
 	b.WriteString("+" + strings.Repeat("-", width-2) + "+")
 	return b.String()
+}
+
+func scrollPanel(title string, lines []string, width, maxHeight int, opts Options) string {
+	if maxHeight < 3 {
+		maxHeight = 3
+	}
+	contentRows := maxHeight - 2
+	scroll := clampScroll(opts.Scroll, len(lines), contentRows)
+	displayTitle := title
+	if len(lines) > contentRows {
+		start := scroll + 1
+		end := min(len(lines), scroll+contentRows)
+		displayTitle = fmt.Sprintf("%s %d-%d/%d", title, start, end, len(lines))
+	}
+	return panel(displayTitle, sliceLines(lines, scroll, contentRows), width, maxHeight, opts)
+}
+
+func sliceLines(lines []string, scroll, rows int) []string {
+	if rows <= 0 || len(lines) == 0 {
+		return nil
+	}
+	scroll = clampScroll(scroll, len(lines), rows)
+	end := min(len(lines), scroll+rows)
+	return lines[scroll:end]
+}
+
+func clampScroll(scroll, total, rows int) int {
+	if scroll < 0 || total <= rows {
+		return 0
+	}
+	maxScroll := max(0, total-rows)
+	return min(scroll, maxScroll)
 }
 
 func joinPanels(left, right string) string {
@@ -719,6 +813,26 @@ func colorGraph(line string, opts Options) string {
 		")", color(opts, ")", cyan),
 	)
 	return replacer.Replace(line)
+}
+
+func colorDiffLine(line string, opts Options) string {
+	if !opts.Color {
+		return line
+	}
+	switch {
+	case strings.HasPrefix(line, "staged diff"), strings.HasPrefix(line, "worktree diff"):
+		return color(opts, line, cyanBold)
+	case strings.HasPrefix(line, "diff --git"), strings.HasPrefix(line, "index "):
+		return color(opts, line, dim)
+	case strings.HasPrefix(line, "@@"):
+		return color(opts, line, cyan)
+	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+		return color(opts, line, green)
+	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+		return color(opts, line, red)
+	default:
+		return line
+	}
 }
 
 type style string
