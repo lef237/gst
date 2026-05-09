@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"time"
@@ -29,33 +31,70 @@ func main() {
 	}
 
 	color := !*noColor && os.Getenv("NO_COLOR") == "" && isTerminal(os.Stdout)
-	width := terminalWidth()
+	width, height := terminalSize()
 	opts := gitstate.Options{LogLimit: *logLimit}
 
 	if !*watch {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		printOnce(ctx, opts, ui.Options{Color: color, Width: width})
+		printOnce(ctx, opts, ui.Options{Color: color, Width: width, Height: height})
 		return
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	restoreInput, err := enableCBreakMode()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gst: %v\n", err)
+		os.Exit(1)
+	}
+	enterTUI()
+	defer func() {
+		leaveTUI()
+		restoreInput()
+	}()
 
 	ticker := time.NewTicker(maxDuration(*interval, 500*time.Millisecond))
 	defer ticker.Stop()
+	keys := readKeys(ctx)
+	active := ui.TabOverview
+	lastFrame := ""
+	forceDraw := true
 
 	for {
-		fmt.Print("\x1b[2J\x1b[H")
+		width, height = terminalSize()
 		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		printOnce(refreshCtx, opts, ui.Options{Color: color, Width: width})
+		frame, err := renderTab(refreshCtx, active, opts, ui.Options{Color: color, Width: width, Height: height, Interactive: true})
 		cancel()
-		fmt.Printf("\n%s\n", dim(color, "watching: press Ctrl-C to quit"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "gst: %v\n", err)
+			return
+		}
+		if forceDraw || frame != lastFrame {
+			drawFrame(frame)
+			lastFrame = frame
+			forceDraw = false
+		}
 
 		select {
 		case <-ctx.Done():
-			fmt.Println()
 			return
+		case key, ok := <-keys:
+			if !ok {
+				return
+			}
+			switch key {
+			case "q", "Q", "\x03":
+				return
+			case "\t":
+				active = (active + 1) % ui.Tab(len(ui.Tabs()))
+				forceDraw = true
+			case "1", "2", "3", "4", "5":
+				active = ui.Tab(key[0] - '1')
+				forceDraw = true
+			case "r", "R":
+				forceDraw = true
+			}
 		case <-ticker.C:
 		}
 	}
@@ -70,14 +109,55 @@ func printOnce(ctx context.Context, opts gitstate.Options, render ui.Options) {
 	fmt.Print(ui.Render(state, render))
 }
 
-func terminalWidth() int {
+func renderTab(ctx context.Context, tab ui.Tab, opts gitstate.Options, render ui.Options) (string, error) {
+	state, err := gitstate.Collect(ctx, ".", opts)
+	if err != nil {
+		return "", err
+	}
+	return ui.RenderTab(state, tab, render), nil
+}
+
+func terminalSize() (int, int) {
+	if size, ok := sttySize(); ok {
+		return size.width, size.height
+	}
+	width := 100
+	height := 32
 	if cols := strings.TrimSpace(os.Getenv("COLUMNS")); cols != "" {
 		var n int
 		if _, err := fmt.Sscanf(cols, "%d", &n); err == nil && n >= 60 {
-			return n
+			width = n
 		}
 	}
-	return 100
+	if lines := strings.TrimSpace(os.Getenv("LINES")); lines != "" {
+		var n int
+		if _, err := fmt.Sscanf(lines, "%d", &n); err == nil && n >= 8 {
+			height = n
+		}
+	}
+	return width, height
+}
+
+type termSize struct {
+	width  int
+	height int
+}
+
+func sttySize() (termSize, bool) {
+	cmd := exec.Command("stty", "size")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	if err != nil {
+		return termSize{}, false
+	}
+	var rows, cols int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d %d", &rows, &cols); err != nil {
+		return termSize{}, false
+	}
+	if rows < 8 || cols < 60 {
+		return termSize{}, false
+	}
+	return termSize{width: cols, height: rows}, true
 }
 
 func isTerminal(f *os.File) bool {
@@ -97,4 +177,61 @@ func dim(color bool, s string) string {
 		return s
 	}
 	return "\x1b[2m" + s + "\x1b[0m"
+}
+
+func enableCBreakMode() (func(), error) {
+	if !isTerminal(os.Stdin) {
+		return func() {}, nil
+	}
+	before, err := stty("-g")
+	if err != nil {
+		return nil, fmt.Errorf("could not inspect terminal mode: %w", err)
+	}
+	if _, err := stty("-icanon", "-echo", "min", "1", "time", "0"); err != nil {
+		return nil, fmt.Errorf("could not enter terminal input mode: %w", err)
+	}
+	return func() {
+		_, _ = stty(strings.TrimSpace(before))
+	}, nil
+}
+
+func enterTUI() {
+	fmt.Print("\x1b[?1049h\x1b[?25l\x1b[H")
+}
+
+func leaveTUI() {
+	fmt.Print("\x1b[?25h\x1b[?1049l")
+}
+
+func drawFrame(frame string) {
+	fmt.Print("\x1b[H")
+	fmt.Print(frame)
+	fmt.Print("\x1b[J")
+}
+
+func stty(args ...string) (string, error) {
+	cmd := exec.Command("stty", args...)
+	cmd.Stdin = os.Stdin
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func readKeys(ctx context.Context) <-chan string {
+	keys := make(chan string, 8)
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			b, err := reader.ReadByte()
+			if err != nil {
+				close(keys)
+				return
+			}
+			select {
+			case keys <- string([]byte{b}):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return keys
 }

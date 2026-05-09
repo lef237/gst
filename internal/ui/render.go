@@ -10,38 +10,104 @@ import (
 )
 
 type Options struct {
-	Color bool
-	Width int
+	Color       bool
+	Width       int
+	Height      int
+	Interactive bool
+}
+
+type Tab int
+
+const (
+	TabOverview Tab = iota
+	TabGraph
+	TabFiles
+	TabRefs
+	TabRemote
+)
+
+func Tabs() []string {
+	return []string{"overview", "graph", "files", "refs", "remote"}
 }
 
 func Render(state gitstate.State, opts Options) string {
+	return RenderTab(state, TabOverview, opts)
+}
+
+func RenderTab(state gitstate.State, active Tab, opts Options) string {
 	if opts.Width < 60 {
 		opts.Width = 60
+	}
+	if opts.Height < 8 {
+		opts.Height = 8
 	}
 
 	var out strings.Builder
 	out.WriteString(header(state, opts))
 	out.WriteString("\n")
 
+	bodyHeight := opts.Height - 2
+	if opts.Interactive {
+		out.WriteString(tabBar(active, opts))
+		out.WriteString("\n")
+		bodyHeight = opts.Height - 4
+	}
+	if bodyHeight < 6 {
+		bodyHeight = 6
+	}
+
+	switch active {
+	case TabGraph:
+		out.WriteString(panel("commit graph", graphLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+	case TabFiles:
+		out.WriteString(panel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+	case TabRefs:
+		out.WriteString(panel("refs", refLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+	case TabRemote:
+		out.WriteString(panel("repository notes", noteLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+	default:
+		out.WriteString(overview(state, opts, bodyHeight))
+	}
+	return trimToHeight(out.String(), opts.Height)
+}
+
+func overview(state gitstate.State, opts Options, bodyHeight int) string {
+	var out strings.Builder
 	leftW := opts.Width/2 - 1
 	rightW := opts.Width - leftW - 2
+	topHeight := 7
+	bottomHeight := max(5, bodyHeight-topHeight-2)
 
 	out.WriteString(joinPanels(
-		panel("sync", syncLines(state, opts), leftW, opts),
-		panel("workspace", workspaceLines(state, opts), rightW, opts),
+		panel("sync", syncLines(state, opts), leftW, topHeight, opts),
+		panel("workspace", workspaceLines(state, opts), rightW, topHeight, opts),
 	))
-	out.WriteString("\n")
-	out.WriteString(panel("commit graph", graphLines(state, opts.Width-4, opts), opts.Width, opts))
 	out.WriteString("\n")
 	out.WriteString(joinPanels(
-		panel("changed files", fileLines(state, leftW-4, opts), leftW, opts),
-		panel("refs", refLines(state, rightW-4, opts), rightW, opts),
+		panel("changed files", fileLines(state, leftW-4, opts), leftW, bottomHeight, opts),
+		panel("commit graph", graphLines(state, rightW-4, opts), rightW, bottomHeight, opts),
 	))
-	if len(state.Remotes) > 0 || len(state.Stashes) > 0 || len(state.Warnings) > 0 {
-		out.WriteString("\n")
-		out.WriteString(panel("repository notes", noteLines(state, opts.Width-4, opts), opts.Width, opts))
-	}
 	return out.String()
+}
+
+func tabBar(active Tab, opts Options) string {
+	tabs := Tabs()
+	var parts []string
+	for i, name := range tabs {
+		label := fmt.Sprintf("%d:%s", i+1, name)
+		if Tab(i) == active {
+			label = color(opts, "["+label+"]", cyanBold)
+		} else {
+			label = color(opts, " "+label+" ", dim)
+		}
+		parts = append(parts, label)
+	}
+	line := strings.Join(parts, " ")
+	help := "tab/1-5 switch  r refresh  q quit"
+	if visibleLen(line)+1+len(help) <= opts.Width {
+		line += " " + color(opts, help, dim)
+	}
+	return truncate(line, opts.Width)
 }
 
 func header(state gitstate.State, opts Options) string {
@@ -190,11 +256,23 @@ func noteLines(state gitstate.State, width int, opts Options) []string {
 	return lines
 }
 
-func panel(title string, lines []string, width int, opts Options) string {
+func panel(title string, lines []string, width, maxHeight int, opts Options) string {
 	if width < 20 {
 		width = 20
 	}
+	if maxHeight < 3 {
+		maxHeight = 3
+	}
 	inner := width - 4
+	contentRows := maxHeight - 2
+	truncated := false
+	if len(lines) > contentRows {
+		lines = lines[:contentRows]
+		truncated = true
+	}
+	if truncated && len(lines) > 0 {
+		lines[len(lines)-1] = color(opts, fmt.Sprintf("... more (%s tab for full view)", title), dim)
+	}
 	var b strings.Builder
 	b.WriteString("+- " + title + " " + strings.Repeat("-", max(0, width-visibleLen(title)-5)) + "+\n")
 	for _, line := range lines {
@@ -298,6 +376,17 @@ func color(opts Options, s string, st style) string {
 		return s
 	}
 	return string(st) + s + string(reset)
+}
+
+func trimToHeight(s string, height int) string {
+	if height <= 0 {
+		return s
+	}
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= height {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(lines[:height], "\n")
 }
 
 func truncate(s string, width int) string {

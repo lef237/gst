@@ -40,6 +40,15 @@ gst --watch --interval 1s
 gst --no-color
 ```
 
+In `--watch` mode, use `tab` to move between views, `1`-`5` to jump directly,
+`r` to refresh, and `q` to quit. The available views are:
+
+- `overview`
+- `graph`
+- `files`
+- `refs`
+- `remote`
+
 ## What It Shows
 
 - `sync`: the relationship between the current local branch and its upstream
