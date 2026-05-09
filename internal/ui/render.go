@@ -256,23 +256,42 @@ func fileLines(state gitstate.State, width int, opts Options) []string {
 	limit := min(len(state.Files), 14)
 	lines := make([]string, 0, limit+1)
 	for _, file := range state.Files[:limit] {
-		status := file.Status
-		switch file.Kind {
-		case "conflict":
-			status = color(opts, status, red)
-		case "untracked":
-			status = color(opts, status, cyan)
-		case "staged", "staged+worktree":
-			status = color(opts, status, green)
-		default:
-			status = color(opts, status, yellow)
-		}
-		lines = append(lines, truncate(fmt.Sprintf("%-2s %s", status, file.Path), width))
+		lines = append(lines, truncate(fmt.Sprintf("%s %s", colorFileStatus(file.Status, opts), file.Path), width))
 	}
 	if len(state.Files) > limit {
 		lines = append(lines, color(opts, fmt.Sprintf("... %d more", len(state.Files)-limit), dim))
 	}
 	return lines
+}
+
+func colorFileStatus(status string, opts Options) string {
+	if !opts.Color {
+		return padRight(status, 2)
+	}
+	if status == "??" {
+		return color(opts, "??", red)
+	}
+	if len(status) < 2 {
+		return color(opts, padRight(status, 2), yellow)
+	}
+	if isConflictStatus(status) {
+		return colorStatusRune(rune(status[0]), false, opts) + colorStatusRune(rune(status[1]), false, opts)
+	}
+	return colorStatusRune(rune(status[0]), true, opts) + colorStatusRune(rune(status[1]), false, opts)
+}
+
+func isConflictStatus(status string) bool {
+	return strings.ContainsRune(status, 'U') || status == "AA" || status == "DD"
+}
+
+func colorStatusRune(r rune, index bool, opts Options) string {
+	if r == '.' || r == ' ' {
+		return " "
+	}
+	if index {
+		return color(opts, string(r), green)
+	}
+	return color(opts, string(r), red)
 }
 
 func refLines(state gitstate.State, width int, opts Options) []string {
@@ -559,14 +578,27 @@ func truncate(s string, width int) string {
 	var b strings.Builder
 	used := 0
 	inEsc := false
+	styleActive := false
+	var esc strings.Builder
 	for _, r := range s {
 		if r == '\x1b' {
 			inEsc = true
+			esc.Reset()
+			esc.WriteRune(r)
+			b.WriteRune(r)
+			continue
 		}
 		if inEsc {
+			esc.WriteRune(r)
 			b.WriteRune(r)
 			if r == 'm' {
 				inEsc = false
+				code := esc.String()
+				if code == string(reset) {
+					styleActive = false
+				} else {
+					styleActive = true
+				}
 			}
 			continue
 		}
@@ -576,6 +608,9 @@ func truncate(s string, width int) string {
 		}
 		b.WriteRune(r)
 		used += w
+	}
+	if styleActive {
+		return b.String() + "." + string(reset)
 	}
 	return b.String() + "."
 }

@@ -97,6 +97,57 @@ func TestRenderNarrowTabsFitWidth(t *testing.T) {
 	}
 }
 
+func TestFileStatusUsesGitLikeColors(t *testing.T) {
+	opts := Options{Color: true}
+
+	mm := colorFileStatus("MM", opts)
+	if !strings.Contains(mm, string(green)+"M"+string(reset)) {
+		t.Fatalf("index status should be green: %q", mm)
+	}
+	if !strings.Contains(mm, string(red)+"M"+string(reset)) {
+		t.Fatalf("worktree status should be red: %q", mm)
+	}
+
+	worktreeOnly := colorFileStatus(".M", opts)
+	if !strings.HasPrefix(worktreeOnly, " ") || !strings.Contains(worktreeOnly, string(red)+"M"+string(reset)) {
+		t.Fatalf("worktree-only status should be blank then red: %q", worktreeOnly)
+	}
+
+	untracked := colorFileStatus("??", opts)
+	if untracked != string(red)+"??"+string(reset) {
+		t.Fatalf("untracked status should be red: %q", untracked)
+	}
+
+	stagedDelete := colorFileStatus("D.", opts)
+	if !strings.Contains(stagedDelete, string(green)+"D"+string(reset)) {
+		t.Fatalf("staged delete should be green: %q", stagedDelete)
+	}
+
+	conflict := colorFileStatus("UU", opts)
+	if strings.Count(conflict, string(red)) != 2 {
+		t.Fatalf("conflict status should color both columns red: %q", conflict)
+	}
+
+	if got := colorFileStatus("MM", Options{}); got != "MM" {
+		t.Fatalf("no-color status mismatch: %q", got)
+	}
+}
+
+func TestTruncateResetsActiveColor(t *testing.T) {
+	out := truncate(color(Options{Color: true}, "this message is too long", yellow), 10)
+	if !strings.Contains(out, string(yellow)) {
+		t.Fatalf("truncated colored string lost its color: %q", out)
+	}
+	if !strings.HasSuffix(out, string(reset)) {
+		t.Fatalf("truncated colored string must reset color to avoid bleed: %q", out)
+	}
+
+	plain := truncate("this message is too long", 10)
+	if strings.Contains(plain, string(reset)) {
+		t.Fatalf("plain truncated string should not gain reset code: %q", plain)
+	}
+}
+
 func TestTabBarResponsiveModes(t *testing.T) {
 	wide := tabBar(TabBranches, Options{Width: 100})
 	if !strings.Contains(wide, "7:remote") || !strings.Contains(wide, "? help") || !strings.Contains(wide, "q quit") {
