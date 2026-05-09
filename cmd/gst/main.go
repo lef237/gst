@@ -233,7 +233,7 @@ func stty(args ...string) (string, error) {
 }
 
 func readKeys(ctx context.Context) <-chan string {
-	keys := make(chan string, 8)
+	keys := make(chan string, 1)
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
 		for {
@@ -242,12 +242,36 @@ func readKeys(ctx context.Context) <-chan string {
 				close(keys)
 				return
 			}
-			select {
-			case keys <- string([]byte{b}):
-			case <-ctx.Done():
+			if !enqueueLatest(ctx, keys, string([]byte{b})) {
 				return
 			}
 		}
 	}()
 	return keys
+}
+
+func enqueueLatest(ctx context.Context, keys chan string, key string) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+	}
+
+	select {
+	case keys <- key:
+		return true
+	default:
+	}
+
+	select {
+	case <-keys:
+	default:
+	}
+
+	select {
+	case keys <- key:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
