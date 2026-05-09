@@ -41,7 +41,8 @@ gst --no-color
 ```
 
 By default, `gst` opens the interactive TUI. Use `tab` to move between views,
-`1`-`7` to jump directly, `?` for help, `r` to refresh, and `q` to quit. The
+`1`-`7` to jump directly, `?` for help, `t` to toggle native `git status`, `r`
+to refresh, and `q` to quit. The
 available views are:
 
 - `overview`
@@ -62,6 +63,7 @@ available views are:
 - `stash`: temporary saved work outside the current branch
 - `refs`: local and remote branches with recent commit ages
 - `repository notes`: remotes, stashes, and non-fatal collection warnings
+- `attention`: in-progress merge/rebase/cherry-pick/revert guidance when relevant
 
 The intended mental model is:
 

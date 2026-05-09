@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -80,6 +81,20 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 	return trimToHeight(out.String(), opts.Height)
 }
 
+func RenderNativeStatus(status string, opts Options) string {
+	if opts.Width < 30 {
+		opts.Width = 30
+	}
+	if opts.Height < 8 {
+		opts.Height = 8
+	}
+	var out strings.Builder
+	out.WriteString(nativeStatusBar(opts))
+	out.WriteString("\n")
+	out.WriteString(panel("git status", nativeStatusLines(status), opts.Width, opts.Height-2, opts))
+	return trimToHeight(out.String(), opts.Height)
+}
+
 func overview(state gitstate.State, opts Options, bodyHeight int) string {
 	if opts.Width < 90 {
 		return narrowOverview(state, opts, bodyHeight)
@@ -90,6 +105,15 @@ func overview(state gitstate.State, opts Options, bodyHeight int) string {
 	rightW := opts.Width - leftW - 2
 	topHeight := 7
 	bottomHeight := max(5, bodyHeight-topHeight-2)
+
+	if lines := attentionLines(state, opts); len(lines) > 0 {
+		alertHeight := min(max(5, len(lines)+2), max(5, bodyHeight-6))
+		out.WriteString(panel("attention", lines, opts.Width, alertHeight, opts))
+		out.WriteString("\n")
+		bodyHeight -= alertHeight + 1
+		topHeight = min(7, max(4, bodyHeight/2))
+		bottomHeight = max(4, bodyHeight-topHeight-1)
+	}
 
 	out.WriteString(joinPanels(
 		panel("sync", syncLines(state, opts), leftW, topHeight, opts),
@@ -105,6 +129,13 @@ func overview(state gitstate.State, opts Options, bodyHeight int) string {
 
 func narrowOverview(state gitstate.State, opts Options, bodyHeight int) string {
 	var out strings.Builder
+	if lines := attentionLines(state, opts); len(lines) > 0 {
+		alertHeight := min(max(5, len(lines)+2), max(5, bodyHeight-4))
+		out.WriteString(panel("attention", lines, opts.Width, alertHeight, opts))
+		out.WriteString("\n")
+		bodyHeight -= alertHeight + 1
+	}
+
 	gapRows := 2
 	panelHeight := max(3, (bodyHeight-gapRows)/3)
 
@@ -134,7 +165,7 @@ func tabBar(active Tab, opts Options) string {
 	}
 
 	line := strings.Join(parts, " ")
-	compactHelp := " ? help  r refresh  q quit"
+	compactHelp := " ? help  t git-status  r refresh  q quit"
 	if visibleLen(line)+visibleLen(compactHelp) <= opts.Width {
 		return line + color(opts, compactHelp, dim)
 	}
@@ -146,7 +177,7 @@ func tabBar(active Tab, opts Options) string {
 }
 
 func compactTabBar(active Tab, tabs []string, opts Options) string {
-	controls := " tab ? q"
+	controls := " tab ? t q"
 	prefix := fmt.Sprintf("[%d/%d ", int(active)+1, len(tabs))
 	suffix := "]"
 	nameWidth := opts.Width - visibleLen(prefix) - visibleLen(suffix) - len(controls)
@@ -167,6 +198,54 @@ func helpTabBar(opts Options) string {
 		return line
 	}
 	return truncate("[? help] tab back  q quit", opts.Width)
+}
+
+func nativeStatusBar(opts Options) string {
+	line := "[git status] t back  r refresh  q quit"
+	return truncate(line, opts.Width)
+}
+
+func nativeStatusLines(status string) []string {
+	lines := strings.Split(strings.TrimRight(status, "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return []string{"git status produced no output"}
+	}
+	for i, line := range lines {
+		lines[i] = expandTabs(strings.TrimRight(line, "\r"), 8)
+	}
+	return lines
+}
+
+func expandTabs(s string, tabWidth int) string {
+	if tabWidth <= 0 || !strings.ContainsRune(s, '\t') {
+		return s
+	}
+	var b strings.Builder
+	col := 0
+	inEsc := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEsc = true
+			b.WriteRune(r)
+			continue
+		}
+		if inEsc {
+			b.WriteRune(r)
+			if r == 'm' {
+				inEsc = false
+			}
+			continue
+		}
+		if r == '\t' {
+			spaces := tabWidth - col%tabWidth
+			b.WriteString(strings.Repeat(" ", spaces))
+			col += spaces
+			continue
+		}
+		b.WriteRune(r)
+		col += runeWidth(r)
+	}
+	return b.String()
 }
 
 func header(state gitstate.State, opts Options) string {
@@ -222,6 +301,41 @@ func syncLines(state gitstate.State, opts Options) []string {
 	return lines
 }
 
+func attentionLines(state gitstate.State, opts Options) []string {
+	if !state.Operation.InProgress && state.Counts.Conflicted == 0 {
+		return nil
+	}
+	var lines []string
+	if state.Operation.InProgress {
+		lines = append(lines, color(opts, fmt.Sprintf("%s in progress", state.Operation.Kind), red))
+	}
+	if state.Counts.Conflicted > 0 {
+		lines = append(lines, color(opts, fmt.Sprintf("%d conflicted file(s)", state.Counts.Conflicted), red))
+		for _, file := range conflictFiles(state) {
+			lines = append(lines, truncate(fmt.Sprintf("%s %s", colorFileStatus(file.Status, opts), file.Path), 120))
+		}
+	}
+	lines = append(lines, "")
+	lines = append(lines, "next action:")
+	if state.Counts.Conflicted > 0 {
+		lines = append(lines, "1. resolve conflicted files")
+		lines = append(lines, "2. git add <resolved files>")
+		if state.Operation.ContinueCommand != "" {
+			lines = append(lines, "3. "+state.Operation.ContinueCommand)
+		}
+	} else if state.Operation.ContinueCommand != "" {
+		lines = append(lines, state.Operation.ContinueCommand)
+	}
+	if state.Operation.SkipCommand != "" {
+		lines = append(lines, "skip: "+state.Operation.SkipCommand)
+	}
+	if state.Operation.AbortCommand != "" {
+		lines = append(lines, "abort: "+state.Operation.AbortCommand)
+	}
+	lines = append(lines, "press t to compare with native git status")
+	return lines
+}
+
 func workspaceLines(state gitstate.State, opts Options) []string {
 	c := state.Counts
 	lines := []string{
@@ -253,15 +367,49 @@ func fileLines(state gitstate.State, width int, opts Options) []string {
 	if len(state.Files) == 0 {
 		return []string{color(opts, "no file changes", green)}
 	}
+	files := prioritizedFiles(state.Files)
 	limit := min(len(state.Files), 14)
 	lines := make([]string, 0, limit+1)
-	for _, file := range state.Files[:limit] {
+	for _, file := range files[:limit] {
 		lines = append(lines, truncate(fmt.Sprintf("%s %s", colorFileStatus(file.Status, opts), file.Path), width))
 	}
 	if len(state.Files) > limit {
 		lines = append(lines, color(opts, fmt.Sprintf("... %d more", len(state.Files)-limit), dim))
 	}
 	return lines
+}
+
+func prioritizedFiles(files []gitstate.File) []gitstate.File {
+	out := append([]gitstate.File(nil), files...)
+	sort.SliceStable(out, func(i, j int) bool {
+		return filePriority(out[i]) < filePriority(out[j])
+	})
+	return out
+}
+
+func filePriority(file gitstate.File) int {
+	switch file.Kind {
+	case "conflict":
+		return 0
+	case "staged", "staged+worktree":
+		return 1
+	case "worktree":
+		return 2
+	case "untracked":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func conflictFiles(state gitstate.State) []gitstate.File {
+	var files []gitstate.File
+	for _, file := range state.Files {
+		if file.Kind == "conflict" {
+			files = append(files, file)
+		}
+	}
+	return files
 }
 
 func colorFileStatus(status string, opts Options) string {
@@ -402,6 +550,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"tab       move to the next view",
 		"1-7       jump to a view directly",
 		"?         open this help view",
+		"t         toggle native git status",
 		"r         refresh immediately",
 		"q         quit",
 		"",
@@ -419,6 +568,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"remote-tracking refs are the last fetched view of the remote",
 		"index is the next commit you are preparing",
 		"worktree is the files currently on disk",
+		"gst never runs write operations; commands shown here are suggestions",
 	}
 	if state.Counts.Conflicted > 0 {
 		lines = append(lines, "", color(opts, "attention: conflicts are present", red))

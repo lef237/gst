@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,13 +25,14 @@ type State struct {
 	Ahead    int
 	Behind   int
 
-	Files    []File
-	Counts   Counts
-	Graph    []string
-	Refs     []Ref
-	Remotes  []Remote
-	Stashes  []Stash
-	Warnings []string
+	Files     []File
+	Counts    Counts
+	Graph     []string
+	Refs      []Ref
+	Remotes   []Remote
+	Stashes   []Stash
+	Warnings  []string
+	Operation Operation
 }
 
 type Counts struct {
@@ -64,6 +67,14 @@ type Stash struct {
 	Name    string
 	Age     string
 	Message string
+}
+
+type Operation struct {
+	Kind            string
+	InProgress      bool
+	ContinueCommand string
+	AbortCommand    string
+	SkipCommand     string
 }
 
 func Collect(ctx context.Context, dir string, opts Options) (State, error) {
@@ -108,7 +119,21 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 		state.Warnings = append(state.Warnings, err.Error())
 	}
 
+	if op, err := detectOperation(ctx, root); err == nil {
+		state.Operation = op
+	} else {
+		state.Warnings = append(state.Warnings, err.Error())
+	}
+
 	return state, nil
+}
+
+func NativeStatus(ctx context.Context, dir string, color bool) (string, error) {
+	colorMode := "never"
+	if color {
+		colorMode = "always"
+	}
+	return git(ctx, dir, "-c", "color.status="+colorMode, "status")
 }
 
 func parseStatus(out string, state *State) {
@@ -270,6 +295,78 @@ func parseStashes(out string) []Stash {
 		stashes = append(stashes, Stash{Name: parts[0], Age: parts[1], Message: parts[2]})
 	}
 	return stashes
+}
+
+func detectOperation(ctx context.Context, root string) (Operation, error) {
+	checks := []struct {
+		kind string
+		path string
+		dir  bool
+	}{
+		{kind: "rebase", path: "rebase-merge", dir: true},
+		{kind: "rebase", path: "rebase-apply", dir: true},
+		{kind: "cherry-pick", path: "CHERRY_PICK_HEAD"},
+		{kind: "revert", path: "REVERT_HEAD"},
+		{kind: "merge", path: "MERGE_HEAD"},
+		{kind: "bisect", path: "BISECT_LOG"},
+	}
+	for _, check := range checks {
+		path, err := gitPath(ctx, root, check.path)
+		if err != nil {
+			return Operation{}, err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return Operation{}, err
+		}
+		if check.dir && !info.IsDir() {
+			continue
+		}
+		if !check.dir && info.IsDir() {
+			continue
+		}
+		return operationFor(check.kind), nil
+	}
+	return Operation{}, nil
+}
+
+func operationFor(kind string) Operation {
+	op := Operation{Kind: kind, InProgress: true}
+	switch kind {
+	case "merge":
+		op.ContinueCommand = "git merge --continue"
+		op.AbortCommand = "git merge --abort"
+	case "rebase":
+		op.ContinueCommand = "git rebase --continue"
+		op.AbortCommand = "git rebase --abort"
+		op.SkipCommand = "git rebase --skip"
+	case "cherry-pick":
+		op.ContinueCommand = "git cherry-pick --continue"
+		op.AbortCommand = "git cherry-pick --abort"
+		op.SkipCommand = "git cherry-pick --skip"
+	case "revert":
+		op.ContinueCommand = "git revert --continue"
+		op.AbortCommand = "git revert --abort"
+		op.SkipCommand = "git revert --skip"
+	case "bisect":
+		op.AbortCommand = "git bisect reset"
+	}
+	return op
+}
+
+func gitPath(ctx context.Context, root, name string) (string, error) {
+	out, err := git(ctx, root, "rev-parse", "--git-path", name)
+	if err != nil {
+		return "", err
+	}
+	path := strings.TrimSpace(out)
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	return filepath.Join(root, path), nil
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {

@@ -58,13 +58,14 @@ func main() {
 	defer ticker.Stop()
 	keys := readKeys(ctx)
 	active := ui.TabOverview
+	nativeStatus := false
 	lastFrame := ""
 	forceDraw := true
 
 	for {
 		width, height = terminalSize()
 		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		frame, err := renderTab(refreshCtx, active, opts, ui.Options{Color: color, Width: width, Height: height, Interactive: true})
+		frame, err := renderFrame(refreshCtx, active, nativeStatus, opts, ui.Options{Color: color, Width: width, Height: height, Interactive: true})
 		cancel()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "gst: %v\n", err)
@@ -94,11 +95,16 @@ func main() {
 				}
 				forceDraw = true
 			case "?":
+				nativeStatus = false
 				active = ui.TabHelp
+				forceDraw = true
+			case "t", "T":
+				nativeStatus = !nativeStatus
 				forceDraw = true
 			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 				next := ui.Tab(key[0] - '1')
 				if int(next) < len(ui.Tabs()) {
+					nativeStatus = false
 					active = next
 					forceDraw = true
 				}
@@ -125,6 +131,17 @@ func renderTab(ctx context.Context, tab ui.Tab, opts gitstate.Options, render ui
 		return "", err
 	}
 	return ui.RenderTab(state, tab, render), nil
+}
+
+func renderFrame(ctx context.Context, tab ui.Tab, native bool, opts gitstate.Options, render ui.Options) (string, error) {
+	if native {
+		status, err := gitstate.NativeStatus(ctx, ".", render.Color)
+		if err != nil {
+			return "", err
+		}
+		return ui.RenderNativeStatus(status, render), nil
+	}
+	return renderTab(ctx, tab, opts, render)
 }
 
 func terminalSize() (int, int) {

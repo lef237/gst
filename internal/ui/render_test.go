@@ -97,6 +97,77 @@ func TestRenderNarrowTabsFitWidth(t *testing.T) {
 	}
 }
 
+func TestOverviewShowsConflictNextActions(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/repo",
+		Branch:   "main",
+		Upstream: "origin/main",
+		Head:     "abcdef1",
+		Files: []gitstate.File{
+			{Status: "UU", Path: "conflict.go", Kind: "conflict"},
+		},
+		Counts: gitstate.Counts{Conflicted: 1},
+		Operation: gitstate.Operation{
+			Kind:            "rebase",
+			InProgress:      true,
+			ContinueCommand: "git rebase --continue",
+			AbortCommand:    "git rebase --abort",
+			SkipCommand:     "git rebase --skip",
+		},
+	}
+
+	out := RenderTab(state, TabOverview, Options{Width: 100, Height: 24, Interactive: true})
+	for _, want := range []string{"attention", "rebase in progress", "conflict.go", "git add <resolved files>", "git rebase --continue", "git rebase --abort", "press t"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("overview missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestFileLinesPrioritizeConflicts(t *testing.T) {
+	state := gitstate.State{
+		Files: []gitstate.File{
+			{Status: ".M", Path: "later.go", Kind: "worktree"},
+			{Status: "UU", Path: "first.go", Kind: "conflict"},
+		},
+	}
+	lines := fileLines(state, 80, Options{})
+	if len(lines) < 2 || !strings.Contains(lines[0], "first.go") {
+		t.Fatalf("conflict should be first: %#v", lines)
+	}
+}
+
+func TestRenderNativeStatus(t *testing.T) {
+	out := RenderNativeStatus("On branch main\nnothing to commit, working tree clean\n", Options{Width: 60, Height: 8})
+	if !strings.Contains(out, "[git status]") || !strings.Contains(out, "On branch main") {
+		t.Fatalf("native status did not render:\n%s", out)
+	}
+	assertFits(t, out, 60, 8)
+}
+
+func TestRenderNativeStatusExpandsTabs(t *testing.T) {
+	status := "Changes to be committed:\n\tmodified:   README.md\n"
+	out := RenderNativeStatus(status, Options{Width: 36, Height: 8})
+	if strings.Contains(out, "\t") {
+		t.Fatalf("native status should not contain raw tabs:\n%s", out)
+	}
+	assertFits(t, out, 36, 8)
+}
+
+func TestExpandTabsWithColor(t *testing.T) {
+	line := "\x1b[32m\tmodified:\x1b[0m file"
+	got := expandTabs(line, 8)
+	if strings.Contains(got, "\t") {
+		t.Fatalf("tab was not expanded: %q", got)
+	}
+	if !strings.Contains(got, "\x1b[32m") || !strings.Contains(got, "\x1b[0m") {
+		t.Fatalf("ANSI color should be preserved: %q", got)
+	}
+	if visibleLen(got) != len("        modified: file") {
+		t.Fatalf("visible width mismatch: got %d for %q", visibleLen(got), got)
+	}
+}
+
 func TestFileStatusUsesGitLikeColors(t *testing.T) {
 	opts := Options{Color: true}
 
@@ -149,11 +220,11 @@ func TestTruncateResetsActiveColor(t *testing.T) {
 }
 
 func TestTabBarResponsiveModes(t *testing.T) {
-	wide := tabBar(TabBranches, Options{Width: 100})
+	wide := tabBar(TabBranches, Options{Width: 120})
 	if !strings.Contains(wide, "7:remote") || !strings.Contains(wide, "? help") || !strings.Contains(wide, "q quit") {
 		t.Fatalf("wide tab bar should include all tabs and compact help:\n%s", wide)
 	}
-	if visibleLen(wide) > 100 {
+	if visibleLen(wide) > 120 {
 		t.Fatalf("wide tab bar overflowed: %d\n%s", visibleLen(wide), wide)
 	}
 
@@ -166,7 +237,7 @@ func TestTabBarResponsiveModes(t *testing.T) {
 	}
 
 	narrow := tabBar(TabBranches, Options{Width: 30})
-	if !strings.Contains(narrow, "4/7") || !strings.Contains(narrow, "? q") {
+	if !strings.Contains(narrow, "4/7") || !strings.Contains(narrow, "? t q") {
 		t.Fatalf("narrow tab bar should keep current tab and quit hint:\n%s", narrow)
 	}
 	if visibleLen(narrow) > 30 {
