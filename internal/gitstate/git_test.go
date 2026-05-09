@@ -36,13 +36,88 @@ u UU N... 100644 100644 100644 100644 aaaaaaa bbbbbbb ccccccc ddddddd conflict.t
 	}
 }
 
+func TestParseStatusPorcelainV2KeepsFullPaths(t *testing.T) {
+	out := strings.Join([]string{
+		"# branch.oid abcdef1234567890",
+		"# branch.head feature/with space",
+		"1 .M N... 100644 100644 100644 aaaaaaa bbbbbbb file with spaces.txt",
+		"2 R. N... 100644 100644 100644 aaaaaaa bbbbbbb R100 renamed file.txt",
+		"file with spaces.txt",
+		"? scratch file.txt",
+		"",
+	}, "\x00")
+	var state State
+	parseStatus(out, &state)
+
+	if state.Branch != "feature/with space" {
+		t.Fatalf("branch with space parse failed: %q", state.Branch)
+	}
+	if len(state.Files) != 3 {
+		t.Fatalf("files mismatch: %#v", state.Files)
+	}
+	if state.Files[0].Path != "file with spaces.txt" {
+		t.Fatalf("path with spaces was not preserved: %#v", state.Files[0])
+	}
+	if state.Files[1].Path != "file with spaces.txt -> renamed file.txt" {
+		t.Fatalf("rename direction/path mismatch: %#v", state.Files[1])
+	}
+	if state.Files[2].Path != "scratch file.txt" {
+		t.Fatalf("untracked path with spaces was not preserved: %#v", state.Files[2])
+	}
+}
+
+func TestParseStatusPorcelainV2UnquotesNonZPaths(t *testing.T) {
+	out := "# branch.oid (initial)\n" +
+		"# branch.head main\n" +
+		"1 .M N... 100644 100644 100644 aaaaaaa bbbbbbb \"quote\\npath.txt\"\n" +
+		"2 R. N... 100644 100644 100644 aaaaaaa bbbbbbb R100 renamed.txt\t\"old\\tname.txt\"\n"
+	var state State
+	parseStatus(out, &state)
+
+	if state.Head != "" {
+		t.Fatalf("initial oid should render as no commits, got %q", state.Head)
+	}
+	if len(state.Files) != 2 {
+		t.Fatalf("files mismatch: %#v", state.Files)
+	}
+	if state.Files[0].Path != "quote\npath.txt" {
+		t.Fatalf("quoted path was not decoded: %#v", state.Files[0])
+	}
+	if state.Files[1].Path != "old\tname.txt -> renamed.txt" {
+		t.Fatalf("quoted rename path was not decoded: %#v", state.Files[1])
+	}
+}
+
 func TestParseRefsSortsCurrentFirst(t *testing.T) {
-	refs := parseRefs("origin/main|1111111|2 days ago|\nmain|2222222|1 day ago|origin/main\n", "main")
+	refs := parseRefs("refs/remotes/origin/main\torigin/main\t1111111\t2 days ago\t\nrefs/heads/main\tmain\t2222222\t1 day ago\torigin/main\n", "main")
 	if len(refs) != 2 {
 		t.Fatalf("refs mismatch: %d", len(refs))
 	}
 	if refs[0].Name != "main" || !refs[0].Current {
 		t.Fatalf("current ref should be first: %#v", refs)
+	}
+}
+
+func TestParseRefsKeepsSlashLocalBranchesLocal(t *testing.T) {
+	refs := parseRefs("refs/heads/feature/demo\tfeature/demo\t2222222\t1 day ago\torigin/feature/demo\nrefs/remotes/origin/main\torigin/main\t1111111\t2 days ago\t\n", "feature/demo")
+	if len(refs) != 2 {
+		t.Fatalf("refs mismatch: %#v", refs)
+	}
+	if refs[0].Name != "feature/demo" || refs[0].Remote || !refs[0].Current {
+		t.Fatalf("slash local branch should be current local ref: %#v", refs[0])
+	}
+	if refs[1].Name != "origin/main" || !refs[1].Remote || refs[1].Current {
+		t.Fatalf("remote ref parse failed: %#v", refs[1])
+	}
+}
+
+func TestParseRefsAllowsPipeInRefNames(t *testing.T) {
+	refs := parseRefs("refs/heads/feature|demo\tfeature|demo\t2222222\t1 day ago\t\n", "feature|demo")
+	if len(refs) != 1 {
+		t.Fatalf("refs mismatch: %#v", refs)
+	}
+	if refs[0].Name != "feature|demo" || refs[0].Remote || !refs[0].Current {
+		t.Fatalf("pipe branch should parse as current local ref: %#v", refs[0])
 	}
 }
 
@@ -137,6 +212,44 @@ func TestCollectDiffIncludesStagedAndWorktreeDiffs(t *testing.T) {
 		if !strings.Contains(diff, want) {
 			t.Fatalf("diff missing %q:\n%s", want, diff)
 		}
+	}
+}
+
+func TestCollectEmptyRepoDoesNotWarnAboutMissingHead(t *testing.T) {
+	root := initTestRepo(t)
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Graph) != 0 {
+		t.Fatalf("empty repo should not have graph lines: %#v", state.Graph)
+	}
+	if len(state.Warnings) != 0 {
+		t.Fatalf("empty repo should not warn: %#v", state.Warnings)
+	}
+}
+
+func TestCollectHandlesPathsWithSpacesAndRenames(t *testing.T) {
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "file with spaces.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "file with spaces.txt")
+	runGit(t, root, "commit", "-qm", "initial")
+	runGit(t, root, "mv", "file with spaces.txt", "renamed file.txt")
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Files) != 1 {
+		t.Fatalf("files mismatch: %#v", state.Files)
+	}
+	if state.Files[0].Path != "file with spaces.txt -> renamed file.txt" {
+		t.Fatalf("rename path mismatch: %#v", state.Files[0])
 	}
 }
 

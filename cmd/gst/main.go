@@ -224,27 +224,6 @@ func printOnce(ctx context.Context, opts gitstate.Options, render ui.Options) {
 	fmt.Print(ui.Render(state, render))
 }
 
-func renderTab(ctx context.Context, tab ui.Tab, opts gitstate.Options, render ui.Options) (string, int, error) {
-	opts.GraphAll = render.GraphAll
-	state, err := gitstate.Collect(ctx, ".", opts)
-	if err != nil {
-		return "", 0, err
-	}
-	render.Scroll = min(render.Scroll, ui.MaxScroll(state, tab, render))
-	return ui.RenderTab(state, tab, render), render.Scroll, nil
-}
-
-func renderFrame(ctx context.Context, tab ui.Tab, native bool, opts gitstate.Options, render ui.Options) (string, int, error) {
-	if native {
-		status, err := gitstate.NativeStatus(ctx, ".", render.Color)
-		if err != nil {
-			return "", 0, err
-		}
-		return ui.RenderNativeStatus(status, render), 0, nil
-	}
-	return renderTab(ctx, tab, opts, render)
-}
-
 func nextTab(active ui.Tab) ui.Tab {
 	if active == ui.TabHelp {
 		return ui.TabOverview

@@ -93,7 +93,7 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 	root = strings.TrimSpace(root)
 
 	state := State{RepoRoot: root}
-	if out, err := git(ctx, root, "status", "--porcelain=v2", "--branch"); err == nil {
+	if out, err := git(ctx, root, "status", "--porcelain=v2", "--branch", "-z"); err == nil {
 		parseStatus(out, &state)
 	} else {
 		state.Warnings = append(state.Warnings, err.Error())
@@ -113,7 +113,7 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 		state.Warnings = append(state.Warnings, err.Error())
 	}
 
-	if out, err := git(ctx, root, "for-each-ref", "refs/heads", "refs/remotes", "--format=%(refname:short)|%(objectname:short)|%(committerdate:relative)|%(upstream:short)"); err == nil {
+	if out, err := git(ctx, root, "for-each-ref", "refs/heads", "refs/remotes", "--format=%(refname)%09%(refname:short)%09%(objectname:short)%09%(committerdate:relative)%09%(upstream:short)"); err == nil {
 		state.Refs = parseRefs(out, state.Branch)
 	} else {
 		state.Warnings = append(state.Warnings, err.Error())
@@ -141,6 +141,14 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 }
 
 func collectGraph(ctx context.Context, root string, limit int, all bool) (string, error) {
+	hasHead, err := hasHeadCommit(ctx, root)
+	if err != nil {
+		return "", err
+	}
+	if !hasHead {
+		return "", nil
+	}
+
 	if all {
 		return git(ctx, root, "log", "--graph", "--decorate", "--oneline", "--all", "--date-order", "-n", strconv.Itoa(limit))
 	}
@@ -152,6 +160,20 @@ func collectGraph(ctx context.Context, root string, limit int, all bool) (string
 	args := []string{"log", "--graph", "--decorate", "--oneline", "--date-order", "-n", strconv.Itoa(limit)}
 	args = append(args, refs...)
 	return git(ctx, root, args...)
+}
+
+func hasHeadCommit(ctx context.Context, root string) (bool, error) {
+	_, err := git(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
+	if err == nil {
+		return true, nil
+	}
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if strings.Contains(err.Error(), "Needed a single revision") {
+		return false, nil
+	}
+	return false, err
 }
 
 func collectDiffs(ctx context.Context, root string) (string, string, error) {
@@ -175,6 +197,11 @@ func NativeStatus(ctx context.Context, dir string, color bool) (string, error) {
 }
 
 func parseStatus(out string, state *State) {
+	if strings.ContainsRune(out, '\x00') {
+		parseStatusZ(out, state)
+		return
+	}
+
 	for _, line := range strings.Split(out, "\n") {
 		if line == "" {
 			continue
@@ -185,11 +212,42 @@ func parseStatus(out string, state *State) {
 		}
 		switch line[0] {
 		case '1', '2':
-			parseTracked(line, state)
+			parseTracked(line, "", state)
 		case 'u':
 			parseUnmerged(line, state)
 		case '?':
-			path := strings.TrimSpace(strings.TrimPrefix(line, "?"))
+			path := unquotePath(strings.TrimPrefix(line, "? "))
+			state.Files = append(state.Files, File{Status: "??", Path: path, Kind: "untracked"})
+			state.Counts.Untracked++
+		}
+	}
+}
+
+func parseStatusZ(out string, state *State) {
+	records := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
+	for i := 0; i < len(records); i++ {
+		record := records[i]
+		if record == "" {
+			continue
+		}
+		if strings.HasPrefix(record, "# ") {
+			parseHeader(record, state)
+			continue
+		}
+		switch record[0] {
+		case '1':
+			parseTracked(record, "", state)
+		case '2':
+			origPath := ""
+			if i+1 < len(records) {
+				origPath = records[i+1]
+				i++
+			}
+			parseTracked(record, origPath, state)
+		case 'u':
+			parseUnmerged(record, state)
+		case '?':
+			path := strings.TrimPrefix(record, "? ")
 			state.Files = append(state.Files, File{Status: "??", Path: path, Kind: "untracked"})
 			state.Counts.Untracked++
 		}
@@ -197,24 +255,24 @@ func parseStatus(out string, state *State) {
 }
 
 func parseHeader(line string, state *State) {
-	fields := strings.Fields(line)
-	if len(fields) < 3 {
-		return
-	}
-	switch fields[1] {
-	case "branch.oid":
-		state.Head = shortHash(fields[2])
-	case "branch.head":
-		if fields[2] == "(detached)" {
+	switch {
+	case strings.HasPrefix(line, "# branch.oid "):
+		oid := strings.TrimPrefix(line, "# branch.oid ")
+		if oid != "(initial)" {
+			state.Head = shortHash(oid)
+		}
+	case strings.HasPrefix(line, "# branch.head "):
+		head := strings.TrimPrefix(line, "# branch.head ")
+		if head == "(detached)" {
 			state.Detached = true
 			state.Branch = "DETACHED"
 		} else {
-			state.Branch = fields[2]
+			state.Branch = head
 		}
-	case "branch.upstream":
-		state.Upstream = fields[2]
-	case "branch.ab":
-		for _, f := range fields[2:] {
+	case strings.HasPrefix(line, "# branch.upstream "):
+		state.Upstream = strings.TrimPrefix(line, "# branch.upstream ")
+	case strings.HasPrefix(line, "# branch.ab "):
+		for _, f := range strings.Fields(strings.TrimPrefix(line, "# branch.ab ")) {
 			if strings.HasPrefix(f, "+") {
 				state.Ahead, _ = strconv.Atoi(strings.TrimPrefix(f, "+"))
 			}
@@ -225,16 +283,29 @@ func parseHeader(line string, state *State) {
 	}
 }
 
-func parseTracked(line string, state *State) {
-	fields := strings.Fields(line)
-	if len(fields) < 9 {
+func parseTracked(line, zOrigPath string, state *State) {
+	parts := strings.SplitN(line, " ", 9)
+	if len(parts) < 9 {
 		return
 	}
-	xy := fields[1]
-	path := fields[len(fields)-1]
-	if line[0] == '2' && len(fields) >= 10 {
-		path = fields[len(fields)-2] + " -> " + fields[len(fields)-1]
+	xy := parts[1]
+	if len(xy) != 2 {
+		return
 	}
+	path := parts[8]
+	if line[0] == '2' {
+		renameParts := strings.SplitN(line, " ", 10)
+		if len(renameParts) < 10 {
+			return
+		}
+		path, zOrigPath = parseRenamePath(renameParts[9], zOrigPath)
+	}
+	path = unquotePath(path)
+	zOrigPath = unquotePath(zOrigPath)
+	if line[0] == '2' && zOrigPath != "" {
+		path = zOrigPath + " -> " + path
+	}
+
 	kind := classifyXY(xy)
 	state.Files = append(state.Files, File{Status: xy, Path: path, Kind: kind})
 	if xy[0] != '.' {
@@ -246,12 +317,34 @@ func parseTracked(line string, state *State) {
 }
 
 func parseUnmerged(line string, state *State) {
-	fields := strings.Fields(line)
-	if len(fields) < 11 {
+	parts := strings.SplitN(line, " ", 11)
+	if len(parts) < 11 {
 		return
 	}
-	state.Files = append(state.Files, File{Status: fields[1], Path: fields[len(fields)-1], Kind: "conflict"})
+	state.Files = append(state.Files, File{Status: parts[1], Path: unquotePath(parts[10]), Kind: "conflict"})
 	state.Counts.Conflicted++
+}
+
+func parseRenamePath(pathField, zOrigPath string) (string, string) {
+	if zOrigPath != "" {
+		return pathField, zOrigPath
+	}
+	path, origPath, found := strings.Cut(pathField, "\t")
+	if !found {
+		return pathField, ""
+	}
+	return path, origPath
+}
+
+func unquotePath(path string) string {
+	if len(path) < 2 || path[0] != '"' {
+		return path
+	}
+	unquoted, err := strconv.Unquote(path)
+	if err != nil {
+		return path
+	}
+	return unquoted
 }
 
 func classifyXY(xy string) string {
@@ -276,21 +369,26 @@ func classifyXY(xy string) string {
 func parseRefs(out, current string) []Ref {
 	var refs []Ref
 	for _, line := range nonEmptyLines(out) {
-		parts := strings.Split(line, "|")
-		for len(parts) < 4 {
+		parts := strings.SplitN(line, "\t", 5)
+		for len(parts) < 5 {
 			parts = append(parts, "")
 		}
-		name := parts[0]
-		if strings.HasSuffix(name, "/HEAD") || name == "origin" {
+		fullName := parts[0]
+		name := parts[1]
+		hash := parts[2]
+		age := parts[3]
+		upstream := parts[4]
+		remote := strings.HasPrefix(fullName, "refs/remotes/")
+		if strings.HasSuffix(fullName, "/HEAD") || name == "origin" {
 			continue
 		}
 		refs = append(refs, Ref{
 			Name:     name,
-			Hash:     parts[1],
-			Age:      parts[2],
-			Upstream: parts[3],
-			Remote:   strings.Contains(name, "/"),
-			Current:  name == current,
+			Hash:     hash,
+			Age:      age,
+			Upstream: upstream,
+			Remote:   remote,
+			Current:  !remote && name == current,
 		})
 	}
 	sort.SliceStable(refs, func(i, j int) bool {
@@ -412,7 +510,13 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		} else {
+			msg = err.Error() + ": " + msg
+		}
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
 	}
 	return string(out), nil
 }
