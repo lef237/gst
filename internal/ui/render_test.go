@@ -34,7 +34,7 @@ func TestRenderTabFitsHeight(t *testing.T) {
 
 func TestRenderHelpTab(t *testing.T) {
 	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
-	out := RenderTab(state, TabHelp, Options{Width: 80, Height: 16, Interactive: true})
+	out := RenderTab(state, TabHelp, Options{Width: 80, Height: 18, Interactive: true})
 
 	if !strings.Contains(out, "[? help]") {
 		t.Fatalf("help tab was not active:\n%s", out)

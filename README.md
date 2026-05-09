@@ -40,10 +40,10 @@ gst --once
 gst --no-color
 ```
 
-By default, `gst` opens the interactive TUI. Use `tab` to move between views,
-`1`-`7` to jump directly, `?` for help, `t` to toggle native `git status`,
-`a` on the graph view to toggle the detailed `--all` graph, `r` to refresh,
-and `q` to quit. The
+By default, `gst` opens the interactive TUI. Use `tab` or the left/right arrow
+keys to move between views, `1`-`7` to jump directly, `?` for help, `t` to
+toggle native `git status`, `a` on the graph view to toggle the detailed
+`--all` graph, `r` to refresh, and `q` to quit. The
 available views are:
 
 - `overview`

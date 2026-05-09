@@ -172,9 +172,9 @@ func tabBar(active Tab, opts Options) string {
 	line := strings.Join(parts, " ")
 	compactHelp := " ? help  t git-status  r refresh  q quit"
 	if active == TabGraph {
-		compactHelp = " ? help  a --all  t git-status  r refresh  q quit"
+		compactHelp = " left/right  ? help  a --all  t git-status  r refresh  q quit"
 		if opts.GraphAll {
-			compactHelp = " ? help  a normal  t git-status  r refresh  q quit"
+			compactHelp = " left/right  ? help  a normal  t git-status  r refresh  q quit"
 		}
 	}
 	if visibleLen(line)+visibleLen(compactHelp) <= opts.Width {
@@ -188,9 +188,9 @@ func tabBar(active Tab, opts Options) string {
 }
 
 func compactTabBar(active Tab, tabs []string, opts Options) string {
-	controls := " tab ? t q"
+	controls := " tab arrows ? t q"
 	if active == TabGraph {
-		controls = " tab ? a t q"
+		controls = " tab arrows ? a t q"
 	}
 	prefix := fmt.Sprintf("[%d/%d ", int(active)+1, len(tabs))
 	suffix := "]"
@@ -580,6 +580,8 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 	lines := []string{
 		color(opts, "keys", cyanBold),
 		"tab       move to the next view",
+		"right     move to the next view",
+		"left      move to the previous view",
 		"1-7       jump to a view directly",
 		"?         open this help view",
 		"t         toggle native git status",

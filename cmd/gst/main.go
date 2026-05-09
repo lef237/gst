@@ -88,12 +88,13 @@ func main() {
 			switch key {
 			case "q", "Q", "\x03":
 				return
-			case "\t":
-				if active == ui.TabHelp {
-					active = ui.TabOverview
-				} else {
-					active = (active + 1) % ui.Tab(len(ui.Tabs()))
-				}
+			case "\t", "right":
+				active = nextTab(active)
+				nativeStatus = false
+				forceDraw = true
+			case "left":
+				active = previousTab(active)
+				nativeStatus = false
 				forceDraw = true
 			case "?":
 				nativeStatus = false
@@ -149,6 +150,20 @@ func renderFrame(ctx context.Context, tab ui.Tab, native bool, opts gitstate.Opt
 		return ui.RenderNativeStatus(status, render), nil
 	}
 	return renderTab(ctx, tab, opts, render)
+}
+
+func nextTab(active ui.Tab) ui.Tab {
+	if active == ui.TabHelp {
+		return ui.TabOverview
+	}
+	return (active + 1) % ui.Tab(len(ui.Tabs()))
+}
+
+func previousTab(active ui.Tab) ui.Tab {
+	if active == ui.TabHelp || active == ui.TabOverview {
+		return ui.Tab(len(ui.Tabs()) - 1)
+	}
+	return active - 1
 }
 
 func terminalSize() (int, int) {
@@ -266,12 +281,47 @@ func readKeys(ctx context.Context) <-chan string {
 				close(keys)
 				return
 			}
-			if !enqueueLatest(ctx, keys, string([]byte{b})) {
+			key, err := parseKey(reader, b)
+			if err != nil {
+				close(keys)
+				return
+			}
+			if key == "" {
+				continue
+			}
+			if !enqueueLatest(ctx, keys, key) {
 				return
 			}
 		}
 	}()
 	return keys
+}
+
+func parseKey(reader *bufio.Reader, b byte) (string, error) {
+	if b != '\x1b' {
+		return string([]byte{b}), nil
+	}
+
+	next, err := reader.ReadByte()
+	if err != nil {
+		return "", err
+	}
+	if next != '[' && next != 'O' {
+		return "", nil
+	}
+
+	final, err := reader.ReadByte()
+	if err != nil {
+		return "", err
+	}
+	switch final {
+	case 'C':
+		return "right", nil
+	case 'D':
+		return "left", nil
+	default:
+		return "", nil
+	}
 }
 
 func enqueueLatest(ctx context.Context, keys chan string, key string) bool {
