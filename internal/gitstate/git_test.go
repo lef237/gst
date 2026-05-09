@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +82,56 @@ func TestDetectOperationRebase(t *testing.T) {
 	}
 }
 
+func TestCollectGraphExcludesStashInternals(t *testing.T) {
+	root := initRepoWithStash(t)
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := strings.Join(state.Graph, "\n")
+	if strings.Contains(graph, "refs/stash") || strings.Contains(graph, "index on") || strings.Contains(graph, "WIP on") {
+		t.Fatalf("graph should hide stash internals:\n%s", graph)
+	}
+	if len(state.Stashes) == 0 {
+		t.Fatal("stash list should still expose stash entries")
+	}
+}
+
+func TestCollectGraphAllIncludesStashInternals(t *testing.T) {
+	root := initRepoWithStash(t)
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20, GraphAll: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := strings.Join(state.Graph, "\n")
+	if !strings.Contains(graph, "refs/stash") && !strings.Contains(graph, "index on") && !strings.Contains(graph, "WIP on") {
+		t.Fatalf("graph --all should expose stash internals:\n%s", graph)
+	}
+}
+
+func initRepoWithStash(t *testing.T) string {
+	t.Helper()
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-qm", "initial")
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "file.txt")
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("three\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "stash", "push", "-q", "-m", "hide changes")
+	return root
+}
+
 func initTestRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -90,4 +141,13 @@ func initTestRepo(t *testing.T) string {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
 	return root
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
 }

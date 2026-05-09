@@ -15,6 +15,7 @@ type Options struct {
 	Width       int
 	Height      int
 	Interactive bool
+	GraphAll    bool
 }
 
 type Tab int
@@ -62,7 +63,11 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 
 	switch active {
 	case TabGraph:
-		out.WriteString(panel("commit graph", graphLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		title := "commit graph"
+		if opts.GraphAll {
+			title = "commit graph --all"
+		}
+		out.WriteString(panel(title, graphTabLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabFiles:
 		out.WriteString(panel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabBranches:
@@ -166,6 +171,12 @@ func tabBar(active Tab, opts Options) string {
 
 	line := strings.Join(parts, " ")
 	compactHelp := " ? help  t git-status  r refresh  q quit"
+	if active == TabGraph {
+		compactHelp = " ? help  a --all  t git-status  r refresh  q quit"
+		if opts.GraphAll {
+			compactHelp = " ? help  a normal  t git-status  r refresh  q quit"
+		}
+	}
 	if visibleLen(line)+visibleLen(compactHelp) <= opts.Width {
 		return line + color(opts, compactHelp, dim)
 	}
@@ -178,6 +189,9 @@ func tabBar(active Tab, opts Options) string {
 
 func compactTabBar(active Tab, tabs []string, opts Options) string {
 	controls := " tab ? t q"
+	if active == TabGraph {
+		controls = " tab ? a t q"
+	}
 	prefix := fmt.Sprintf("[%d/%d ", int(active)+1, len(tabs))
 	suffix := "]"
 	nameWidth := opts.Width - visibleLen(prefix) - visibleLen(suffix) - len(controls)
@@ -361,6 +375,24 @@ func graphLines(state gitstate.State, width int, opts Options) []string {
 		lines = append(lines, colorGraph(truncate(line, width), opts))
 	}
 	return lines
+}
+
+func graphTabLines(state gitstate.State, width int, opts Options) []string {
+	lines := make([]string, 0, len(state.Graph)+2)
+	if opts.GraphAll {
+		lines = append(lines,
+			color(opts, truncate("mode: detailed --all", width), yellow),
+			color(opts, truncate("press a to return to normal branch graph", width), dim),
+			"",
+		)
+	} else {
+		lines = append(lines,
+			color(opts, truncate("mode: normal branch graph", width), cyanBold),
+			color(opts, truncate("press a to show detailed --all graph, including stash/internal refs", width), yellow),
+			"",
+		)
+	}
+	return append(lines, graphLines(state, width, opts)...)
 }
 
 func fileLines(state gitstate.State, width int, opts Options) []string {
@@ -551,12 +583,13 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"1-7       jump to a view directly",
 		"?         open this help view",
 		"t         toggle native git status",
+		"a         toggle --all detail mode on graph view",
 		"r         refresh immediately",
 		"q         quit",
 		"",
 		color(opts, "views", cyanBold),
 		"overview  sync, workspace, changed files, and recent graph",
-		"graph     recent commit graph across local and remote refs",
+		"graph     normal graph; press a for detailed --all graph",
 		"files     index and worktree changes",
 		"branches  current branch, upstream, and branch relationships",
 		"stash     temporary saved work outside the current branch",

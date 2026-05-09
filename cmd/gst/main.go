@@ -59,13 +59,14 @@ func main() {
 	keys := readKeys(ctx)
 	active := ui.TabOverview
 	nativeStatus := false
+	graphAll := false
 	lastFrame := ""
 	forceDraw := true
 
 	for {
 		width, height = terminalSize()
 		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		frame, err := renderFrame(refreshCtx, active, nativeStatus, opts, ui.Options{Color: color, Width: width, Height: height, Interactive: true})
+		frame, err := renderFrame(refreshCtx, active, nativeStatus, opts, ui.Options{Color: color, Width: width, Height: height, Interactive: true, GraphAll: graphAll})
 		cancel()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "gst: %v\n", err)
@@ -101,6 +102,11 @@ func main() {
 			case "t", "T":
 				nativeStatus = !nativeStatus
 				forceDraw = true
+			case "a", "A":
+				if active == ui.TabGraph && !nativeStatus {
+					graphAll = !graphAll
+					forceDraw = true
+				}
 			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 				next := ui.Tab(key[0] - '1')
 				if int(next) < len(ui.Tabs()) {
@@ -126,6 +132,7 @@ func printOnce(ctx context.Context, opts gitstate.Options, render ui.Options) {
 }
 
 func renderTab(ctx context.Context, tab ui.Tab, opts gitstate.Options, render ui.Options) (string, error) {
+	opts.GraphAll = render.GraphAll
 	state, err := gitstate.Collect(ctx, ".", opts)
 	if err != nil {
 		return "", err

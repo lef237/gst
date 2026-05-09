@@ -41,8 +41,9 @@ gst --no-color
 ```
 
 By default, `gst` opens the interactive TUI. Use `tab` to move between views,
-`1`-`7` to jump directly, `?` for help, `t` to toggle native `git status`, `r`
-to refresh, and `q` to quit. The
+`1`-`7` to jump directly, `?` for help, `t` to toggle native `git status`,
+`a` on the graph view to toggle the detailed `--all` graph, `r` to refresh,
+and `q` to quit. The
 available views are:
 
 - `overview`
@@ -57,7 +58,8 @@ available views are:
 
 - `sync`: the relationship between the current local branch and its upstream
 - `workspace`: staged, modified, untracked, and conflicted file counts
-- `commit graph`: recent commits across local and remote refs
+- `commit graph`: recent commits across local and remote refs; graph view can
+  toggle a detailed `--all` graph with `a`
 - `changed files`: a compact list of working tree and index changes
 - `branches`: current branch, upstream, and local/remote branch relationships
 - `stash`: temporary saved work outside the current branch

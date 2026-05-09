@@ -14,6 +14,7 @@ import (
 
 type Options struct {
 	LogLimit int
+	GraphAll bool
 }
 
 type State struct {
@@ -95,7 +96,7 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 		state.Warnings = append(state.Warnings, err.Error())
 	}
 
-	if out, err := git(ctx, root, "log", "--graph", "--decorate", "--oneline", "--all", "--date-order", "-n", strconv.Itoa(opts.LogLimit)); err == nil {
+	if out, err := collectGraph(ctx, root, opts.LogLimit, opts.GraphAll); err == nil {
 		state.Graph = nonEmptyLines(out)
 	} else {
 		state.Warnings = append(state.Warnings, err.Error())
@@ -126,6 +127,20 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 	}
 
 	return state, nil
+}
+
+func collectGraph(ctx context.Context, root string, limit int, all bool) (string, error) {
+	if all {
+		return git(ctx, root, "log", "--graph", "--decorate", "--oneline", "--all", "--date-order", "-n", strconv.Itoa(limit))
+	}
+	out, err := git(ctx, root, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
+	if err != nil {
+		return "", err
+	}
+	refs := append([]string{"HEAD"}, nonEmptyLines(out)...)
+	args := []string{"log", "--graph", "--decorate", "--oneline", "--date-order", "-n", strconv.Itoa(limit)}
+	args = append(args, refs...)
+	return git(ctx, root, args...)
 }
 
 func NativeStatus(ctx context.Context, dir string, color bool) (string, error) {

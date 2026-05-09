@@ -34,13 +34,32 @@ func TestRenderTabFitsHeight(t *testing.T) {
 
 func TestRenderHelpTab(t *testing.T) {
 	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
-	out := RenderTab(state, TabHelp, Options{Width: 80, Height: 14, Interactive: true})
+	out := RenderTab(state, TabHelp, Options{Width: 80, Height: 16, Interactive: true})
 
 	if !strings.Contains(out, "[? help]") {
 		t.Fatalf("help tab was not active:\n%s", out)
 	}
 	if !strings.Contains(out, "?") || !strings.Contains(out, "q") {
 		t.Fatalf("help text should include key bindings:\n%s", out)
+	}
+}
+
+func TestRenderGraphAllMode(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/repo",
+		Branch:   "main",
+		Head:     "abcdef1",
+		Graph:    []string{"* abcdef1 (HEAD -> main) one"},
+	}
+
+	normal := RenderTab(state, TabGraph, Options{Width: 130, Height: 12, Interactive: true})
+	if !strings.Contains(normal, "a --all") || !strings.Contains(normal, "press a to show detailed --all graph") {
+		t.Fatalf("normal graph should advertise --all toggle:\n%s", normal)
+	}
+
+	detailed := RenderTab(state, TabGraph, Options{Width: 130, Height: 12, Interactive: true, GraphAll: true})
+	if !strings.Contains(detailed, "commit graph --all") || !strings.Contains(detailed, "a normal") || !strings.Contains(detailed, "press a to return to normal branch graph") {
+		t.Fatalf("detailed graph mode was not rendered:\n%s", detailed)
 	}
 }
 
