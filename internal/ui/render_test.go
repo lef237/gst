@@ -36,7 +36,7 @@ func TestRenderHelpTab(t *testing.T) {
 	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
 	out := RenderTab(state, TabHelp, Options{Width: 80, Height: 14, Interactive: true})
 
-	if !strings.Contains(out, "[8:help]") {
+	if !strings.Contains(out, "[? help]") {
 		t.Fatalf("help tab was not active:\n%s", out)
 	}
 	if !strings.Contains(out, "?") || !strings.Contains(out, "q") {
@@ -66,5 +66,77 @@ func TestRenderBranchAndStashTabs(t *testing.T) {
 	stash := RenderTab(state, TabStash, Options{Width: 90, Height: 12, Interactive: true})
 	if !strings.Contains(stash, "[5:stash]") || !strings.Contains(stash, "stash@{0}") {
 		t.Fatalf("stash tab did not render stash entry:\n%s", stash)
+	}
+}
+
+func TestRenderNarrowOverviewFitsWidth(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/very/long/repository/path/that/must/not/overflow",
+		Branch:   "feature/very-long-branch-name",
+		Upstream: "origin/feature/very-long-branch-name",
+		Head:     "abcdef1",
+		Ahead:    3,
+		Files: []gitstate.File{
+			{Status: ".M", Path: "a/very/long/path/to/a/changed/file/that/should/be/truncated.go", Kind: "worktree"},
+		},
+		Counts: gitstate.Counts{Modified: 1},
+	}
+
+	out := RenderTab(state, TabOverview, Options{Width: 40, Height: 14, Interactive: true})
+	assertFits(t, out, 40, 14)
+	if strings.Contains(out, "+  +") {
+		t.Fatalf("narrow overview should not render side-by-side panels:\n%s", out)
+	}
+}
+
+func TestRenderNarrowTabsFitWidth(t *testing.T) {
+	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
+	for _, tab := range []Tab{TabGraph, TabFiles, TabBranches, TabStash, TabRefs, TabRemote, TabHelp} {
+		out := RenderTab(state, tab, Options{Width: 35, Height: 10, Interactive: true})
+		assertFits(t, out, 35, 10)
+	}
+}
+
+func TestTabBarResponsiveModes(t *testing.T) {
+	wide := tabBar(TabBranches, Options{Width: 100})
+	if !strings.Contains(wide, "7:remote") || !strings.Contains(wide, "? help") || !strings.Contains(wide, "q quit") {
+		t.Fatalf("wide tab bar should include all tabs and compact help:\n%s", wide)
+	}
+	if visibleLen(wide) > 100 {
+		t.Fatalf("wide tab bar overflowed: %d\n%s", visibleLen(wide), wide)
+	}
+
+	medium := tabBar(TabBranches, Options{Width: 70})
+	if !strings.Contains(medium, "[4:branches]") || !strings.Contains(medium, "7:remote") {
+		t.Fatalf("medium tab bar should include all tabs:\n%s", medium)
+	}
+	if visibleLen(medium) > 70 {
+		t.Fatalf("medium tab bar overflowed: %d\n%s", visibleLen(medium), medium)
+	}
+
+	narrow := tabBar(TabBranches, Options{Width: 30})
+	if !strings.Contains(narrow, "4/7") || !strings.Contains(narrow, "? q") {
+		t.Fatalf("narrow tab bar should keep current tab and quit hint:\n%s", narrow)
+	}
+	if visibleLen(narrow) > 30 {
+		t.Fatalf("narrow tab bar overflowed: %d\n%s", visibleLen(narrow), narrow)
+	}
+
+	help := tabBar(TabHelp, Options{Width: 35})
+	if !strings.Contains(help, "? help") || visibleLen(help) > 35 {
+		t.Fatalf("help tab bar should fit and show help state:\n%s", help)
+	}
+}
+
+func assertFits(t *testing.T, out string, width, height int) {
+	t.Helper()
+	lines := strings.Split(out, "\n")
+	if len(lines) > height {
+		t.Fatalf("rendered %d lines, want at most %d:\n%s", len(lines), height, out)
+	}
+	for i, line := range lines {
+		if visibleLen(line) > width {
+			t.Fatalf("line %d has width %d, want at most %d:\n%s", i+1, visibleLen(line), width, out)
+		}
 	}
 }

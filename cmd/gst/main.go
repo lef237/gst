@@ -87,7 +87,11 @@ func main() {
 			case "q", "Q", "\x03":
 				return
 			case "\t":
-				active = (active + 1) % ui.Tab(len(ui.Tabs()))
+				if active == ui.TabHelp {
+					active = ui.TabOverview
+				} else {
+					active = (active + 1) % ui.Tab(len(ui.Tabs()))
+				}
 				forceDraw = true
 			case "?":
 				active = ui.TabHelp
@@ -131,7 +135,7 @@ func terminalSize() (int, int) {
 	height := 32
 	if cols := strings.TrimSpace(os.Getenv("COLUMNS")); cols != "" {
 		var n int
-		if _, err := fmt.Sscanf(cols, "%d", &n); err == nil && n >= 60 {
+		if _, err := fmt.Sscanf(cols, "%d", &n); err == nil && n >= 30 {
 			width = n
 		}
 	}
@@ -160,7 +164,7 @@ func sttySize() (termSize, bool) {
 	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d %d", &rows, &cols); err != nil {
 		return termSize{}, false
 	}
-	if rows < 8 || cols < 60 {
+	if rows < 8 || cols < 30 {
 		return termSize{}, false
 	}
 	return termSize{width: cols, height: rows}, true
@@ -211,7 +215,13 @@ func leaveTUI() {
 
 func drawFrame(frame string) {
 	fmt.Print("\x1b[H")
-	fmt.Print(frame)
+	for i, line := range strings.Split(frame, "\n") {
+		if i > 0 {
+			fmt.Print("\n")
+		}
+		fmt.Print("\x1b[2K")
+		fmt.Print(line)
+	}
 	fmt.Print("\x1b[J")
 }
 

@@ -30,7 +30,7 @@ const (
 )
 
 func Tabs() []string {
-	return []string{"overview", "graph", "files", "branches", "stash", "refs", "remote", "help"}
+	return []string{"overview", "graph", "files", "branches", "stash", "refs", "remote"}
 }
 
 func Render(state gitstate.State, opts Options) string {
@@ -38,8 +38,8 @@ func Render(state gitstate.State, opts Options) string {
 }
 
 func RenderTab(state gitstate.State, active Tab, opts Options) string {
-	if opts.Width < 60 {
-		opts.Width = 60
+	if opts.Width < 30 {
+		opts.Width = 30
 	}
 	if opts.Height < 8 {
 		opts.Height = 8
@@ -81,6 +81,10 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 }
 
 func overview(state gitstate.State, opts Options, bodyHeight int) string {
+	if opts.Width < 90 {
+		return narrowOverview(state, opts, bodyHeight)
+	}
+
 	var out strings.Builder
 	leftW := opts.Width/2 - 1
 	rightW := opts.Width - leftW - 2
@@ -99,7 +103,24 @@ func overview(state gitstate.State, opts Options, bodyHeight int) string {
 	return out.String()
 }
 
+func narrowOverview(state gitstate.State, opts Options, bodyHeight int) string {
+	var out strings.Builder
+	gapRows := 2
+	panelHeight := max(3, (bodyHeight-gapRows)/3)
+
+	out.WriteString(panel("sync", syncLines(state, opts), opts.Width, panelHeight, opts))
+	out.WriteString("\n")
+	out.WriteString(panel("workspace", workspaceLines(state, opts), opts.Width, panelHeight, opts))
+	out.WriteString("\n")
+	out.WriteString(panel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight-panelHeight*2-gapRows, opts))
+	return out.String()
+}
+
 func tabBar(active Tab, opts Options) string {
+	if active == TabHelp {
+		return helpTabBar(opts)
+	}
+
 	tabs := Tabs()
 	var parts []string
 	for i, name := range tabs {
@@ -111,12 +132,41 @@ func tabBar(active Tab, opts Options) string {
 		}
 		parts = append(parts, label)
 	}
+
 	line := strings.Join(parts, " ")
-	help := "tab/1-8 switch  ? help  r refresh  q quit"
-	if visibleLen(line)+1+len(help) <= opts.Width {
-		line += " " + color(opts, help, dim)
+	compactHelp := " ? help  r refresh  q quit"
+	if visibleLen(line)+visibleLen(compactHelp) <= opts.Width {
+		return line + color(opts, compactHelp, dim)
 	}
-	return truncate(line, opts.Width)
+	if visibleLen(line) <= opts.Width {
+		return line
+	}
+
+	return compactTabBar(active, tabs, opts)
+}
+
+func compactTabBar(active Tab, tabs []string, opts Options) string {
+	controls := " tab ? q"
+	prefix := fmt.Sprintf("[%d/%d ", int(active)+1, len(tabs))
+	suffix := "]"
+	nameWidth := opts.Width - visibleLen(prefix) - visibleLen(suffix) - len(controls)
+	if nameWidth < 1 {
+		return truncate(fmt.Sprintf("[%d/%d] ? q", int(active)+1, len(tabs)), opts.Width)
+	}
+	name := truncate(tabs[int(active)], nameWidth)
+	return color(opts, prefix+name+suffix, cyanBold) + color(opts, controls, dim)
+}
+
+func helpTabBar(opts Options) string {
+	line := "1:overview 2:graph 3:files 4:branches 5:stash 6:refs 7:remote [? help]"
+	if visibleLen(line) <= opts.Width {
+		controls := " tab back  q quit"
+		if visibleLen(line)+len(controls) <= opts.Width {
+			return line + color(opts, controls, dim)
+		}
+		return line
+	}
+	return truncate("[? help] tab back  q quit", opts.Width)
 }
 
 func header(state gitstate.State, opts Options) string {
@@ -331,7 +381,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 	lines := []string{
 		color(opts, "keys", cyanBold),
 		"tab       move to the next view",
-		"1-8       jump to a view directly",
+		"1-7       jump to a view directly",
 		"?         open this help view",
 		"r         refresh immediately",
 		"q         quit",
@@ -366,6 +416,9 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 func panel(title string, lines []string, width, maxHeight int, opts Options) string {
 	if width < 20 {
 		width = 20
+	}
+	if titleWidth := visibleLen(title) + 6; width < titleWidth {
+		title = truncate(title, max(1, width-6))
 	}
 	if maxHeight < 3 {
 		maxHeight = 3

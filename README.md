@@ -41,7 +41,7 @@ gst --no-color
 ```
 
 By default, `gst` opens the interactive TUI. Use `tab` to move between views,
-`1`-`8` to jump directly, `?` for help, `r` to refresh, and `q` to quit. The
+`1`-`7` to jump directly, `?` for help, `r` to refresh, and `q` to quit. The
 available views are:
 
 - `overview`
@@ -51,7 +51,6 @@ available views are:
 - `stash`
 - `refs`
 - `remote`
-- `help`
 
 ## What It Shows
 
