@@ -25,6 +25,12 @@ For local development:
 go run ./cmd/gst
 ```
 
+To build a local binary:
+
+```sh
+go build -o ~/tmp/gst ./cmd/gst
+```
+
 ## Usage
 
 ```sh
