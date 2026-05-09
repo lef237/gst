@@ -89,9 +89,15 @@ func main() {
 			case "\t":
 				active = (active + 1) % ui.Tab(len(ui.Tabs()))
 				forceDraw = true
-			case "1", "2", "3", "4", "5":
-				active = ui.Tab(key[0] - '1')
+			case "?":
+				active = ui.TabHelp
 				forceDraw = true
+			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+				next := ui.Tab(key[0] - '1')
+				if int(next) < len(ui.Tabs()) {
+					active = next
+					forceDraw = true
+				}
 			case "r", "R":
 				forceDraw = true
 			}

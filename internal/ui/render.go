@@ -22,12 +22,15 @@ const (
 	TabOverview Tab = iota
 	TabGraph
 	TabFiles
+	TabBranches
+	TabStash
 	TabRefs
 	TabRemote
+	TabHelp
 )
 
 func Tabs() []string {
-	return []string{"overview", "graph", "files", "refs", "remote"}
+	return []string{"overview", "graph", "files", "branches", "stash", "refs", "remote", "help"}
 }
 
 func Render(state gitstate.State, opts Options) string {
@@ -61,10 +64,16 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 		out.WriteString(panel("commit graph", graphLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabFiles:
 		out.WriteString(panel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+	case TabBranches:
+		out.WriteString(panel("branches", branchLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+	case TabStash:
+		out.WriteString(panel("stash", stashLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabRefs:
 		out.WriteString(panel("refs", refLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabRemote:
 		out.WriteString(panel("repository notes", noteLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+	case TabHelp:
+		out.WriteString(panel("help", helpLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	default:
 		out.WriteString(overview(state, opts, bodyHeight))
 	}
@@ -98,12 +107,12 @@ func tabBar(active Tab, opts Options) string {
 		if Tab(i) == active {
 			label = color(opts, "["+label+"]", cyanBold)
 		} else {
-			label = color(opts, " "+label+" ", dim)
+			label = color(opts, label, dim)
 		}
 		parts = append(parts, label)
 	}
 	line := strings.Join(parts, " ")
-	help := "tab/1-5 switch  r refresh  q quit"
+	help := "tab/1-8 switch  ? help  r refresh  q quit"
 	if visibleLen(line)+1+len(help) <= opts.Width {
 		line += " " + color(opts, help, dim)
 	}
@@ -242,6 +251,68 @@ func refLines(state gitstate.State, width int, opts Options) []string {
 	return lines
 }
 
+func branchLines(state gitstate.State, width int, opts Options) []string {
+	var lines []string
+	lines = append(lines, kv("current", state.Branch))
+	lines = append(lines, kv("upstream", state.Upstream))
+	if state.Upstream == "" {
+		lines = append(lines, color(opts, "this branch has no upstream; push/pull has no default partner", yellow))
+	} else {
+		switch {
+		case state.Ahead == 0 && state.Behind == 0:
+			lines = append(lines, color(opts, "current branch is synchronized with upstream", green))
+		case state.Ahead > 0 && state.Behind == 0:
+			lines = append(lines, color(opts, fmt.Sprintf("current branch is ahead by %d commit(s)", state.Ahead), yellow))
+		case state.Ahead == 0 && state.Behind > 0:
+			lines = append(lines, color(opts, fmt.Sprintf("current branch is behind by %d commit(s)", state.Behind), magenta))
+		default:
+			lines = append(lines, color(opts, fmt.Sprintf("current branch diverged: local +%d / remote +%d", state.Ahead, state.Behind), red))
+		}
+	}
+	lines = append(lines, "")
+
+	locals := 0
+	remotes := 0
+	for _, ref := range state.Refs {
+		if ref.Remote {
+			remotes++
+			continue
+		}
+		locals++
+		prefix := " "
+		if ref.Current {
+			prefix = color(opts, "*", green)
+		}
+		upstream := ref.Upstream
+		if upstream == "" {
+			upstream = "(no upstream)"
+		}
+		lines = append(lines, truncate(fmt.Sprintf("%s %-22s -> %-22s %s %s", prefix, ref.Name, upstream, ref.Hash, ref.Age), width))
+	}
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("local branches: %d    remote branches: %d", locals, remotes))
+	if remotes > 0 {
+		lines = append(lines, "remote-tracking branches show the last fetched remote state")
+	}
+	return lines
+}
+
+func stashLines(state gitstate.State, width int, opts Options) []string {
+	if len(state.Stashes) == 0 {
+		return []string{
+			color(opts, "no stashes", green),
+			"stash is a temporary shelf outside the normal commit graph",
+		}
+	}
+	lines := make([]string, 0, len(state.Stashes)+2)
+	lines = append(lines, "stash entries are not on the current branch until applied")
+	lines = append(lines, "")
+	for _, stash := range state.Stashes {
+		lines = append(lines, truncate(fmt.Sprintf("%-10s %-14s %s", stash.Name, stash.Age, stash.Message), width))
+	}
+	return lines
+}
+
 func noteLines(state gitstate.State, width int, opts Options) []string {
 	var lines []string
 	for _, remote := range state.Remotes {
@@ -252,6 +323,42 @@ func noteLines(state gitstate.State, width int, opts Options) []string {
 	}
 	for _, warning := range state.Warnings {
 		lines = append(lines, color(opts, truncate("warning "+warning, width), yellow))
+	}
+	return lines
+}
+
+func helpLines(state gitstate.State, width int, opts Options) []string {
+	lines := []string{
+		color(opts, "keys", cyanBold),
+		"tab       move to the next view",
+		"1-8       jump to a view directly",
+		"?         open this help view",
+		"r         refresh immediately",
+		"q         quit",
+		"",
+		color(opts, "views", cyanBold),
+		"overview  sync, workspace, changed files, and recent graph",
+		"graph     recent commit graph across local and remote refs",
+		"files     index and worktree changes",
+		"branches  current branch, upstream, and branch relationships",
+		"stash     temporary saved work outside the current branch",
+		"refs      local and remote refs",
+		"remote    remotes, stashes, and collection warnings",
+		"",
+		color(opts, "mental model", cyanBold),
+		"local is your checked-out repository state",
+		"remote-tracking refs are the last fetched view of the remote",
+		"index is the next commit you are preparing",
+		"worktree is the files currently on disk",
+	}
+	if state.Counts.Conflicted > 0 {
+		lines = append(lines, "", color(opts, "attention: conflicts are present", red))
+	}
+	if state.Upstream == "" {
+		lines = append(lines, "", color(opts, "attention: current branch has no upstream", yellow))
+	}
+	for i, line := range lines {
+		lines[i] = truncate(line, width)
 	}
 	return lines
 }

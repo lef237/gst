@@ -41,14 +41,17 @@ gst --no-color
 ```
 
 By default, `gst` opens the interactive TUI. Use `tab` to move between views,
-`1`-`5` to jump directly, `r` to refresh, and `q` to quit. The available views
-are:
+`1`-`8` to jump directly, `?` for help, `r` to refresh, and `q` to quit. The
+available views are:
 
 - `overview`
 - `graph`
 - `files`
+- `branches`
+- `stash`
 - `refs`
 - `remote`
+- `help`
 
 ## What It Shows
 
@@ -56,6 +59,8 @@ are:
 - `workspace`: staged, modified, untracked, and conflicted file counts
 - `commit graph`: recent commits across local and remote refs
 - `changed files`: a compact list of working tree and index changes
+- `branches`: current branch, upstream, and local/remote branch relationships
+- `stash`: temporary saved work outside the current branch
 - `refs`: local and remote branches with recent commit ages
 - `repository notes`: remotes, stashes, and non-fatal collection warnings
 
