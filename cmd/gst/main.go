@@ -259,7 +259,7 @@ func canScroll(active ui.Tab, native bool) bool {
 	if native {
 		return false
 	}
-	return active == ui.TabGraph || active == ui.TabDiff
+	return active != ui.TabOverview
 }
 
 func pageStep(height int) int {

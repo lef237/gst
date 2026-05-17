@@ -117,6 +117,30 @@ func TestScrollablePanelUsesOffset(t *testing.T) {
 	}
 }
 
+func TestFileTabScrollsLongLists(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/repo",
+		Branch:   "main",
+		Head:     "abcdef1",
+		Files: []gitstate.File{
+			{Status: ".M", Path: "one.go", Kind: "worktree"},
+			{Status: ".M", Path: "two.go", Kind: "worktree"},
+			{Status: ".M", Path: "three.go", Kind: "worktree"},
+			{Status: ".M", Path: "four.go", Kind: "worktree"},
+			{Status: ".M", Path: "five.go", Kind: "worktree"},
+			{Status: ".M", Path: "six.go", Kind: "worktree"},
+		},
+	}
+
+	out := RenderTab(state, TabFiles, Options{Width: 80, Height: 8, Interactive: true, Scroll: 2})
+	if !strings.Contains(out, "changed files 3-") || !strings.Contains(out, "three.go") || strings.Contains(out, "one.go") {
+		t.Fatalf("file tab should render with scroll offset:\n%s", out)
+	}
+	if got := MaxScroll(state, TabFiles, Options{Width: 80, Height: 8, Interactive: true}); got == 0 {
+		t.Fatalf("file tab should be scrollable")
+	}
+}
+
 func TestRenderBranchAndStashTabs(t *testing.T) {
 	state := gitstate.State{
 		RepoRoot: "/repo",
@@ -159,6 +183,26 @@ func TestRenderNarrowOverviewFitsWidth(t *testing.T) {
 	assertFits(t, out, 40, 14)
 	if strings.Contains(out, "+  +") {
 		t.Fatalf("narrow overview should not render side-by-side panels:\n%s", out)
+	}
+}
+
+func TestRenderNarrowOverviewKeepsMetersVisible(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/repo",
+		Branch:   "feature",
+		Head:     "abcdef1",
+		Files: []gitstate.File{
+			{Status: ".M", Path: "internal/ui/render.go", Kind: "worktree"},
+		},
+		Counts: gitstate.Counts{Modified: 1},
+	}
+
+	out := RenderTab(state, TabOverview, Options{Width: 50, Height: 18, Interactive: false})
+	assertFits(t, out, 50, 18)
+	for _, want := range []string{"changes    1", "worktree", "[##################]", "WORKTREE"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("narrow overview missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -207,6 +251,20 @@ func TestFileLinesPrioritizeConflicts(t *testing.T) {
 	lines := fileLines(state, 80, Options{})
 	if len(lines) < 2 || !strings.Contains(lines[0], "first.go") {
 		t.Fatalf("conflict should be first: %#v", lines)
+	}
+	if !strings.Contains(lines[0], "CONFLICT") || !strings.Contains(lines[1], "WORKTREE") {
+		t.Fatalf("file kind labels should be rendered: %#v", lines)
+	}
+}
+
+func TestWorkspaceLinesRenderMeters(t *testing.T) {
+	state := gitstate.State{Counts: gitstate.Counts{Staged: 2, Modified: 1, Untracked: 1}}
+	lines := workspaceLines(state, Options{})
+	out := strings.Join(lines, "\n")
+	for _, want := range []string{"changes    4", "staged       2", "worktree     1", "untracked    1", "[#########.........]"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("workspace meters missing %q:\n%s", want, out)
+		}
 	}
 }
 

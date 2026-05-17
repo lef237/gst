@@ -44,9 +44,9 @@ By default, `gst` opens the interactive TUI. Use `tab` or the left/right arrow
 keys to move between views, `1`-`8` to jump directly, `?` for help, `t` to
 toggle native `git status`, `a` on the graph view to toggle the detailed
 `--all` graph, `s` on the diff view to toggle worktree/staged diff, and
-less-like keys to scroll graph and diff views: `j`/`k` for one line, `d`/`u`
-for half a page, and `f`/`b` for one page. Use `r` to refresh, and `q` to quit.
-The
+less-like keys to scroll graph, diff, and long list views: `j`/`k` for one
+line, `d`/`u` for half a page, and `f`/`b` for one page. Use `r` to refresh,
+and `q` to quit. The
 available views are:
 
 - `overview`
@@ -62,9 +62,11 @@ available views are:
 
 - `sync`: the relationship between the current local branch and its upstream
 - `workspace`: staged, modified, untracked, and conflicted file counts
+  rendered as compact dashboard meters
 - `commit graph`: recent commits across local and remote refs; graph view can
   toggle a detailed `--all` graph with `a` and scroll through older commits
-- `changed files`: a compact list of working tree and index changes
+- `changed files`: a compact list of working tree and index changes with
+  explicit kind labels
 - `diff`: the current worktree or staged patch, toggled with `s`
 - `branches`: current branch, upstream, and local/remote branch relationships
 - `stash`: temporary saved work outside the current branch
