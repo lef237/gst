@@ -62,9 +62,11 @@ available views are:
 
 - `sync`: the relationship between the current local branch and its upstream
 - `workspace`: staged, modified, untracked, and conflicted file counts
+  rendered as compact dashboard meters
 - `commit graph`: recent commits across local and remote refs; graph view can
   toggle a detailed `--all` graph with `a` and scroll through older commits
-- `changed files`: a compact list of working tree and index changes
+- `changed files`: a compact list of working tree and index changes with
+  explicit kind labels
 - `diff`: the current worktree or staged patch, toggled with `s`
 - `branches`: current branch, upstream, and local/remote branch relationships
 - `stash`: temporary saved work outside the current branch

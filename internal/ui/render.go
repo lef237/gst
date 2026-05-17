@@ -170,15 +170,39 @@ func narrowOverview(state gitstate.State, opts Options, bodyHeight int) string {
 		bodyHeight -= alertHeight + 1
 	}
 
-	gapRows := 2
-	panelHeight := max(3, (bodyHeight-gapRows)/3)
+	sync := syncLines(state, opts)
+	workspace := workspaceLines(state, opts)
+	files := fileLines(state, opts.Width-4, opts)
+	syncHeight, workspaceHeight, filesHeight := narrowPanelHeights(bodyHeight, len(sync), len(workspace))
 
-	out.WriteString(panel("sync", syncLines(state, opts), opts.Width, panelHeight, opts))
+	out.WriteString(panel("sync", sync, opts.Width, syncHeight, opts))
 	out.WriteString("\n")
-	out.WriteString(panel("workspace", workspaceLines(state, opts), opts.Width, panelHeight, opts))
+	out.WriteString(panel("workspace", workspace, opts.Width, workspaceHeight, opts))
 	out.WriteString("\n")
-	out.WriteString(panel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight-panelHeight*2-gapRows, opts))
+	out.WriteString(panel("changed files", files, opts.Width, filesHeight, opts))
 	return out.String()
+}
+
+func narrowPanelHeights(bodyHeight, syncRows, workspaceRows int) (int, int, int) {
+	const (
+		gapRows        = 2
+		minPanelHeight = 3
+	)
+	syncHeight := min(max(minPanelHeight, syncRows+2), max(4, bodyHeight/3+2))
+	workspaceHeight := min(max(minPanelHeight, workspaceRows+2), max(4, bodyHeight/3+3))
+	filesHeight := bodyHeight - syncHeight - workspaceHeight - gapRows
+	for filesHeight < minPanelHeight && workspaceHeight > minPanelHeight {
+		workspaceHeight--
+		filesHeight++
+	}
+	for filesHeight < minPanelHeight && syncHeight > minPanelHeight {
+		syncHeight--
+		filesHeight++
+	}
+	if filesHeight < minPanelHeight {
+		filesHeight = minPanelHeight
+	}
+	return syncHeight, workspaceHeight, filesHeight
 }
 
 func tabBar(active Tab, opts Options) string {
@@ -309,11 +333,12 @@ func header(state gitstate.State, opts Options) string {
 	if state.Counts.Conflicted > 0 {
 		status = color(opts, "conflicts", red)
 	} else if dirty(state) {
-		status = color(opts, "changes", yellow)
+		status = color(opts, fmt.Sprintf("changes:%d", totalChanges(state.Counts)), yellow)
 	} else {
 		status = color(opts, "clean", green)
 	}
-	line := fmt.Sprintf("%s %s on %s @ %s  %s", color(opts, title, cyanBold), status, color(opts, branch, whiteBold), head, state.RepoRoot)
+	counters := fmt.Sprintf("S:%d W:%d U:%d C:%d", state.Counts.Staged, state.Counts.Modified, state.Counts.Untracked, state.Counts.Conflicted)
+	line := fmt.Sprintf("%s %s on %s @ %s  %s  %s", color(opts, title, cyanBold), status, color(opts, branch, whiteBold), head, color(opts, counters, dim), state.RepoRoot)
 	return truncate(line, opts.Width)
 }
 
@@ -331,20 +356,18 @@ func syncLines(state gitstate.State, opts Options) []string {
 		return lines
 	}
 
+	lines = append(lines, fmt.Sprintf("%-10s +%d / -%d", "distance", state.Ahead, state.Behind))
 	switch {
 	case state.Ahead == 0 && state.Behind == 0:
 		lines = append(lines, color(opts, "local and remote point at the same commit", green))
 	case state.Ahead > 0 && state.Behind == 0:
 		lines = append(lines, color(opts, fmt.Sprintf("local is ahead by %d commit(s)", state.Ahead), yellow))
-		lines = append(lines, "mental model: local has commits remote cannot see yet")
 	case state.Ahead == 0 && state.Behind > 0:
 		lines = append(lines, color(opts, fmt.Sprintf("local is behind by %d commit(s)", state.Behind), magenta))
-		lines = append(lines, "mental model: remote has commits local has not copied yet")
 	default:
 		lines = append(lines, color(opts, fmt.Sprintf("diverged: local +%d / remote +%d", state.Ahead, state.Behind), red))
-		lines = append(lines, "mental model: both sides have unique commits")
 	}
-	lines = append(lines, syncBar(state.Ahead, state.Behind, opts))
+	lines = append(lines, "sync      "+syncBar(state.Ahead, state.Behind, opts))
 	return lines
 }
 
@@ -385,18 +408,22 @@ func attentionLines(state gitstate.State, opts Options) []string {
 
 func workspaceLines(state gitstate.State, opts Options) []string {
 	c := state.Counts
-	lines := []string{
-		kv("staged", strconv.Itoa(c.Staged)),
-		kv("worktree", strconv.Itoa(c.Modified)),
-		kv("untracked", strconv.Itoa(c.Untracked)),
-		kv("conflicts", strconv.Itoa(c.Conflicted)),
+	total := totalChanges(c)
+	if total == 0 {
+		return []string{
+			kv("changes", "0"),
+			meterLine("staged", 0, 1, green, opts),
+			meterLine("worktree", 0, 1, yellow, opts),
+			color(opts, "index and working tree are clean", green),
+		}
 	}
-	if !dirty(state) {
-		lines = append(lines, color(opts, "index and working tree are clean", green))
-	} else {
-		lines = append(lines, "index = next commit, worktree = files on disk")
+	return []string{
+		kv("changes", strconv.Itoa(total)),
+		meterLine("staged", c.Staged, total, green, opts),
+		meterLine("worktree", c.Modified, total, yellow, opts),
+		meterLine("untracked", c.Untracked, total, magenta, opts),
+		meterLine("conflicts", c.Conflicted, total, red, opts),
 	}
-	return lines
 }
 
 func graphLines(state gitstate.State, width int, opts Options) []string {
@@ -459,7 +486,7 @@ func fileLines(state gitstate.State, width int, opts Options) []string {
 	limit := min(len(state.Files), 14)
 	lines := make([]string, 0, limit+1)
 	for _, file := range files[:limit] {
-		lines = append(lines, truncate(fmt.Sprintf("%s %s", colorFileStatus(file.Status, opts), file.Path), width))
+		lines = append(lines, truncate(fmt.Sprintf("%s %-9s %s", colorFileStatus(file.Status, opts), fileKindLabel(file.Kind, opts), file.Path), width))
 	}
 	if len(state.Files) > limit {
 		lines = append(lines, color(opts, fmt.Sprintf("... %d more", len(state.Files)-limit), dim))
@@ -530,6 +557,23 @@ func colorStatusRune(r rune, index bool, opts Options) string {
 	return color(opts, string(r), red)
 }
 
+func fileKindLabel(kind string, opts Options) string {
+	switch kind {
+	case "conflict":
+		return color(opts, "CONFLICT", red)
+	case "staged+worktree":
+		return color(opts, "INDEX+WT", yellow)
+	case "staged":
+		return color(opts, "INDEX", green)
+	case "worktree":
+		return color(opts, "WORKTREE", yellow)
+	case "untracked":
+		return color(opts, "NEW", magenta)
+	default:
+		return color(opts, strings.ToUpper(kind), dim)
+	}
+}
+
 func refLines(state gitstate.State, width int, opts Options) []string {
 	if len(state.Refs) == 0 {
 		return []string{color(opts, "no refs", dim)}
@@ -547,7 +591,11 @@ func refLines(state gitstate.State, width int, opts Options) []string {
 		} else if ref.Current {
 			name = color(opts, name, whiteBold)
 		}
-		line := fmt.Sprintf("%s %-18s %s %s", prefix, name, ref.Hash, ref.Age)
+		scope := color(opts, "local", green)
+		if ref.Remote {
+			scope = color(opts, "remote", magenta)
+		}
+		line := fmt.Sprintf("%s %-6s %-18s %s %s", prefix, scope, name, ref.Hash, ref.Age)
 		lines = append(lines, truncate(line, width))
 	}
 	if len(state.Refs) > limit {
@@ -696,18 +744,32 @@ func panel(title string, lines []string, width, maxHeight int, opts Options) str
 		lines = lines[:contentRows]
 		truncated = true
 	}
-	if truncated && len(lines) > 0 {
+	if truncated && len(lines) > 1 {
 		lines[len(lines)-1] = color(opts, fmt.Sprintf("... more (%s tab for full view)", title), dim)
 	}
 	var b strings.Builder
-	b.WriteString("+- " + title + " " + strings.Repeat("-", max(0, width-visibleLen(title)-5)) + "+\n")
+	b.WriteString(panelTopBorder(title, width, opts))
+	b.WriteString("\n")
 	for _, line := range lines {
-		b.WriteString("| ")
+		b.WriteString(color(opts, "|", dim))
+		b.WriteString(" ")
 		b.WriteString(padRight(truncate(line, inner), inner))
-		b.WriteString(" |\n")
+		b.WriteString(" ")
+		b.WriteString(color(opts, "|", dim))
+		b.WriteString("\n")
 	}
-	b.WriteString("+" + strings.Repeat("-", width-2) + "+")
+	b.WriteString(panelBorder("+"+strings.Repeat("-", width-2)+"+", opts))
 	return b.String()
+}
+
+func panelTopBorder(title string, width int, opts Options) string {
+	return panelBorder("+- ", opts) +
+		color(opts, title, cyanBold) +
+		panelBorder(" "+strings.Repeat("-", max(0, width-visibleLen(title)-5))+"+", opts)
+}
+
+func panelBorder(s string, opts Options) string {
+	return color(opts, s, dim)
 }
 
 func scrollPanel(title string, lines []string, width, maxHeight int, opts Options) string {
@@ -787,6 +849,33 @@ func syncBar(ahead, behind int, opts Options) string {
 		color(opts, strings.Repeat("-", mid), dim) +
 		color(opts, strings.Repeat("<", right), magenta) +
 		"]"
+}
+
+func meterLine(label string, value, total int, st style, opts Options) string {
+	return fmt.Sprintf("%-10s %3d %s", label, value, meter(value, total, 18, st, opts))
+}
+
+func meter(value, total, cells int, st style, opts Options) string {
+	if cells <= 0 {
+		return "[]"
+	}
+	if total <= 0 {
+		total = 1
+	}
+	value = max(0, value)
+	filled := value * cells / total
+	if value > 0 && filled == 0 {
+		filled = 1
+	}
+	filled = min(cells, filled)
+	return "[" +
+		color(opts, strings.Repeat("#", filled), st) +
+		color(opts, strings.Repeat(".", cells-filled), dim) +
+		"]"
+}
+
+func totalChanges(c gitstate.Counts) int {
+	return c.Staged + c.Modified + c.Untracked + c.Conflicted
 }
 
 func kv(k, v string) string {
