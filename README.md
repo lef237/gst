@@ -31,6 +31,8 @@ To build a local binary:
 go build -o ~/tmp/gst ./cmd/gst
 ```
 
+Release steps are documented in [docs/release.md](docs/release.md).
+
 ## Usage
 
 ```sh
