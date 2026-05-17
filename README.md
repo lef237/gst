@@ -44,9 +44,9 @@ By default, `gst` opens the interactive TUI. Use `tab` or the left/right arrow
 keys to move between views, `1`-`8` to jump directly, `?` for help, `t` to
 toggle native `git status`, `a` on the graph view to toggle the detailed
 `--all` graph, `s` on the diff view to toggle worktree/staged diff, and
-less-like keys to scroll graph and diff views: `j`/`k` for one line, `d`/`u`
-for half a page, and `f`/`b` for one page. Use `r` to refresh, and `q` to quit.
-The
+less-like keys to scroll graph, diff, and long list views: `j`/`k` for one
+line, `d`/`u` for half a page, and `f`/`b` for one page. Use `r` to refresh,
+and `q` to quit. The
 available views are:
 
 - `overview`

@@ -67,7 +67,7 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 		}
 		out.WriteString(scrollPanel(title, graphTabLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabFiles:
-		out.WriteString(panel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		out.WriteString(scrollPanel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabDiff:
 		title := "diff worktree"
 		if opts.DiffStaged {
@@ -75,15 +75,15 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 		}
 		out.WriteString(scrollPanel(title, diffLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabBranches:
-		out.WriteString(panel("branches", branchLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		out.WriteString(scrollPanel("branches", branchLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabStash:
-		out.WriteString(panel("stash", stashLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		out.WriteString(scrollPanel("stash", stashLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabRefs:
-		out.WriteString(panel("refs", refLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		out.WriteString(scrollPanel("refs", refLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabRemote:
-		out.WriteString(panel("repository notes", noteLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		out.WriteString(scrollPanel("repository notes", noteLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabHelp:
-		out.WriteString(panel("help", helpLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		out.WriteString(scrollPanel("help", helpLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	default:
 		out.WriteString(overview(state, opts, bodyHeight))
 	}
@@ -103,8 +103,20 @@ func MaxScroll(state gitstate.State, active Tab, opts Options) int {
 	switch active {
 	case TabGraph:
 		return max(0, len(graphTabLines(state, opts.Width-4, opts))-rows)
+	case TabFiles:
+		return max(0, len(fileLines(state, opts.Width-4, opts))-rows)
 	case TabDiff:
 		return max(0, len(diffLines(state, opts.Width-4, opts))-rows)
+	case TabBranches:
+		return max(0, len(branchLines(state, opts.Width-4, opts))-rows)
+	case TabStash:
+		return max(0, len(stashLines(state, opts.Width-4, opts))-rows)
+	case TabRefs:
+		return max(0, len(refLines(state, opts.Width-4, opts))-rows)
+	case TabRemote:
+		return max(0, len(noteLines(state, opts.Width-4, opts))-rows)
+	case TabHelp:
+		return max(0, len(helpLines(state, opts.Width-4, opts))-rows)
 	default:
 		return 0
 	}
@@ -223,7 +235,7 @@ func tabBar(active Tab, opts Options) string {
 	}
 
 	line := strings.Join(parts, " ")
-	compactHelp := " arrows/tab tabs  ? help  t git-status  r refresh  q quit"
+	compactHelp := " arrows/tab tabs  j/k scroll  ? help  t git-status  r refresh  q quit"
 	if active == TabGraph {
 		compactHelp = " f/b page  d/u half  j/k line  a --all  ? help  q quit"
 		if opts.GraphAll {

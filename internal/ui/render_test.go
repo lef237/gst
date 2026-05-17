@@ -117,6 +117,30 @@ func TestScrollablePanelUsesOffset(t *testing.T) {
 	}
 }
 
+func TestFileTabScrollsLongLists(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/repo",
+		Branch:   "main",
+		Head:     "abcdef1",
+		Files: []gitstate.File{
+			{Status: ".M", Path: "one.go", Kind: "worktree"},
+			{Status: ".M", Path: "two.go", Kind: "worktree"},
+			{Status: ".M", Path: "three.go", Kind: "worktree"},
+			{Status: ".M", Path: "four.go", Kind: "worktree"},
+			{Status: ".M", Path: "five.go", Kind: "worktree"},
+			{Status: ".M", Path: "six.go", Kind: "worktree"},
+		},
+	}
+
+	out := RenderTab(state, TabFiles, Options{Width: 80, Height: 8, Interactive: true, Scroll: 2})
+	if !strings.Contains(out, "changed files 3-") || !strings.Contains(out, "three.go") || strings.Contains(out, "one.go") {
+		t.Fatalf("file tab should render with scroll offset:\n%s", out)
+	}
+	if got := MaxScroll(state, TabFiles, Options{Width: 80, Height: 8, Interactive: true}); got == 0 {
+		t.Fatalf("file tab should be scrollable")
+	}
+}
+
 func TestRenderBranchAndStashTabs(t *testing.T) {
 	state := gitstate.State{
 		RepoRoot: "/repo",

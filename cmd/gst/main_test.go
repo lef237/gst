@@ -112,3 +112,15 @@ func TestTabNavigationWraps(t *testing.T) {
 		t.Fatalf("previous help = %v, want remote", got)
 	}
 }
+
+func TestCanScrollListTabs(t *testing.T) {
+	if canScroll(ui.TabOverview, false) {
+		t.Fatal("overview should not scroll")
+	}
+	if !canScroll(ui.TabFiles, false) || !canScroll(ui.TabRefs, false) || !canScroll(ui.TabHelp, false) {
+		t.Fatal("list-style tabs should scroll")
+	}
+	if canScroll(ui.TabFiles, true) {
+		t.Fatal("native status mode keeps its own static view")
+	}
+}
