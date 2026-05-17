@@ -3,9 +3,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/lef237/gst/internal/gitstate"
 	"github.com/lef237/gst/internal/ui"
 )
 
@@ -42,6 +44,25 @@ func TestEnqueueLatestStopsWhenContextIsDone(t *testing.T) {
 	keys := make(chan string, 1)
 	if enqueueLatest(ctx, keys, "q") {
 		t.Fatal("enqueue should stop after context cancellation")
+	}
+}
+
+func TestPrintOnceReturnsFailureOutsideGitRepo(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := printOnce(context.Background(), gitstate.Options{}, ui.Options{}); got != 1 {
+		t.Fatalf("printOnce outside a git repository = %d, want 1", got)
 	}
 }
 

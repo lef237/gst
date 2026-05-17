@@ -121,6 +121,16 @@ func TestParseRefsAllowsPipeInRefNames(t *testing.T) {
 	}
 }
 
+func TestParseRefsKeepsLocalBranchNamedOrigin(t *testing.T) {
+	refs := parseRefs("refs/remotes/origin/HEAD\torigin\t1111111\t2 days ago\t\nrefs/heads/origin\torigin\t2222222\t1 day ago\t\n", "origin")
+	if len(refs) != 1 {
+		t.Fatalf("refs mismatch: %#v", refs)
+	}
+	if refs[0].Name != "origin" || refs[0].Remote || !refs[0].Current {
+		t.Fatalf("local branch named origin should be kept: %#v", refs[0])
+	}
+}
+
 func TestDetectOperationMerge(t *testing.T) {
 	root := initTestRepo(t)
 	if err := os.WriteFile(filepath.Join(root, ".git", "MERGE_HEAD"), []byte("abc\n"), 0o644); err != nil {

@@ -379,7 +379,7 @@ func parseRefs(out, current string) []Ref {
 		age := parts[3]
 		upstream := parts[4]
 		remote := strings.HasPrefix(fullName, "refs/remotes/")
-		if strings.HasSuffix(fullName, "/HEAD") || name == "origin" {
+		if remote && strings.HasSuffix(fullName, "/HEAD") {
 			continue
 		}
 		refs = append(refs, Ref{

@@ -16,18 +16,26 @@ import (
 )
 
 func main() {
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
+	flags := flag.NewFlagSet("gst", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
 	var (
-		once     = flag.Bool("once", false, "print one snapshot and exit")
-		interval = flag.Duration("interval", 2*time.Second, "refresh interval for the TUI")
-		noColor  = flag.Bool("no-color", false, "disable ANSI colors")
-		logLimit = flag.Int("log", 200, "number of commits to keep available in the graph")
-		version  = flag.Bool("version", false, "print version and exit")
+		once     = flags.Bool("once", false, "print one snapshot and exit")
+		interval = flags.Duration("interval", 2*time.Second, "refresh interval for the TUI")
+		noColor  = flags.Bool("no-color", false, "disable ANSI colors")
+		logLimit = flags.Int("log", 200, "number of commits to keep available in the graph")
+		version  = flags.Bool("version", false, "print version and exit")
 	)
-	flag.Parse()
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
 
 	if *version {
 		fmt.Println("gst dev")
-		return
+		return 0
 	}
 
 	color := !*noColor && os.Getenv("NO_COLOR") == "" && isTerminal(os.Stdout)
@@ -37,8 +45,7 @@ func main() {
 	if *once {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		printOnce(ctx, opts, ui.Options{Color: color, Width: width, Height: height})
-		return
+		return printOnce(ctx, opts, ui.Options{Color: color, Width: width, Height: height})
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -46,13 +53,24 @@ func main() {
 	restoreInput, err := enableCBreakMode()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gst: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	enterTUI()
-	defer func() {
+	tuiActive := true
+	cleanupTUI := func() {
+		if !tuiActive {
+			return
+		}
 		leaveTUI()
 		restoreInput()
-	}()
+		tuiActive = false
+	}
+	defer cleanupTUI()
+	failTUI := func(err error) int {
+		cleanupTUI()
+		fmt.Fprintf(os.Stderr, "gst: %v\n", err)
+		return 1
+	}
 
 	ticker := time.NewTicker(maxDuration(*interval, 500*time.Millisecond))
 	defer ticker.Stop()
@@ -80,8 +98,7 @@ func main() {
 				status, err := gitstate.NativeStatus(refreshCtx, ".", renderOpts.Color)
 				cancel()
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "gst: %v\n", err)
-					return
+					return failTUI(err)
 				}
 				nativeOutput = status
 				nativeReady = true
@@ -95,8 +112,7 @@ func main() {
 				nextState, err := gitstate.Collect(refreshCtx, ".", collectOpts)
 				cancel()
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "gst: %v\n", err)
-					return
+					return failTUI(err)
 				}
 				state = nextState
 				stateReady = true
@@ -116,14 +132,14 @@ func main() {
 
 		select {
 		case <-ctx.Done():
-			return
+			return 0
 		case key, ok := <-keys:
 			if !ok {
-				return
+				return 0
 			}
 			switch key {
 			case "q", "Q", "\x03":
-				return
+				return 0
 			case "\t", "right":
 				active = nextTab(active)
 				nativeStatus = false
@@ -215,13 +231,14 @@ func main() {
 	}
 }
 
-func printOnce(ctx context.Context, opts gitstate.Options, render ui.Options) {
+func printOnce(ctx context.Context, opts gitstate.Options, render ui.Options) int {
 	state, err := gitstate.Collect(ctx, ".", opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gst: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	fmt.Print(ui.Render(state, render))
+	return 0
 }
 
 func nextTab(active ui.Tab) ui.Tab {
