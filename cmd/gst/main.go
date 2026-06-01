@@ -339,13 +339,6 @@ func min(a, b int) int {
 	return b
 }
 
-func dim(color bool, s string) string {
-	if !color {
-		return s
-	}
-	return "\x1b[2m" + s + "\x1b[0m"
-}
-
 func enableCBreakMode() (func(), error) {
 	if !isTerminal(os.Stdin) {
 		return func() {}, nil
