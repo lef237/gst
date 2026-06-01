@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -15,8 +16,23 @@ import (
 	"github.com/lef237/gst/internal/ui"
 )
 
+// version is overridable at build time with
+// -ldflags "-X main.version=v0.1.0"; otherwise it is read from the module
+// build info so `go install ...@v0.1.0` reports the installed tag.
+var version = ""
+
 func main() {
 	os.Exit(run(os.Args[1:]))
+}
+
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
 }
 
 func run(args []string) int {
@@ -34,7 +50,7 @@ func run(args []string) int {
 	}
 
 	if *version {
-		fmt.Println("gst dev")
+		fmt.Println("gst " + buildVersion())
 		return 0
 	}
 

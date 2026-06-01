@@ -82,15 +82,18 @@ directory is present, discard it first:
 trash ~/tmp/gst-release
 ```
 
-Then build the assets:
+Then build the assets. Pass the tag through `-ldflags` so the binaries report
+the right version from `gst --version` (binaries built this way carry no module
+version otherwise, unlike `go install`):
 
 ```sh
 mkdir -p ~/tmp/gst-release
 
-GOOS=darwin GOARCH=arm64 go build -o ~/tmp/gst-release/gst-darwin-arm64 ./cmd/gst
-GOOS=darwin GOARCH=amd64 go build -o ~/tmp/gst-release/gst-darwin-amd64 ./cmd/gst
-GOOS=linux GOARCH=amd64 go build -o ~/tmp/gst-release/gst-linux-amd64 ./cmd/gst
-GOOS=windows GOARCH=amd64 go build -o ~/tmp/gst-release/gst-windows-amd64.exe ./cmd/gst
+LDFLAGS="-X main.version=v0.1.0"
+GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o ~/tmp/gst-release/gst-darwin-arm64 ./cmd/gst
+GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o ~/tmp/gst-release/gst-darwin-amd64 ./cmd/gst
+GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o ~/tmp/gst-release/gst-linux-amd64 ./cmd/gst
+GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o ~/tmp/gst-release/gst-windows-amd64.exe ./cmd/gst
 ```
 
 Create checksums:
