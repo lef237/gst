@@ -72,7 +72,7 @@ func run(args []string) int {
 		return 1
 	}
 
-	ticker := time.NewTicker(maxDuration(*interval, 500*time.Millisecond))
+	ticker := time.NewTicker(max(*interval, 500*time.Millisecond))
 	defer ticker.Stop()
 	keys := readKeys(ctx)
 	active := ui.TabOverview
@@ -316,27 +316,6 @@ func sttySize() (termSize, bool) {
 func isTerminal(f *os.File) bool {
 	info, err := f.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
-func maxDuration(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func enableCBreakMode() (func(), error) {
