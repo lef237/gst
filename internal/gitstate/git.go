@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type Options struct {
@@ -93,48 +94,92 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 	root = strings.TrimSpace(root)
 
 	state := State{RepoRoot: root}
-	if out, err := git(ctx, root, "status", "--porcelain=v2", "--branch", "-z"); err == nil {
-		parseStatus(out, &state)
-	} else {
+
+	// Each git invocation spawns a subprocess, so the collection is dominated
+	// by process startup latency rather than CPU. Run the independent queries
+	// concurrently and parse their output after they all finish. Status and
+	// refs are only captured here because parseRefs needs the branch name that
+	// parseStatus extracts, so their parsing is serialized afterward.
+	var (
+		mu        sync.Mutex
+		wg        sync.WaitGroup
+		statusOut string
+		statusOK  bool
+		refsOut   string
+		refsOK    bool
+	)
+	warn := func(err error) {
+		mu.Lock()
 		state.Warnings = append(state.Warnings, err.Error())
+		mu.Unlock()
+	}
+	run := func(fn func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fn()
+		}()
 	}
 
-	if out, err := collectGraph(ctx, root, opts.LogLimit, opts.GraphAll); err == nil {
-		state.Graph = nonEmptyLines(out)
-	} else {
-		state.Warnings = append(state.Warnings, err.Error())
-	}
+	run(func() {
+		if out, err := git(ctx, root, "status", "--porcelain=v2", "--branch", "-z"); err == nil {
+			statusOut, statusOK = out, true
+		} else {
+			warn(err)
+		}
+	})
+	run(func() {
+		if out, err := collectGraph(ctx, root, opts.LogLimit, opts.GraphAll); err == nil {
+			state.Graph = nonEmptyLines(out)
+		} else {
+			warn(err)
+		}
+	})
+	run(func() {
+		if staged, worktree, err := collectDiffs(ctx, root); err == nil {
+			state.StagedDiff = diffLines(staged)
+			state.WorktreeDiff = diffLines(worktree)
+			state.Diff = combineDiffs(state.StagedDiff, state.WorktreeDiff)
+		} else {
+			warn(err)
+		}
+	})
+	run(func() {
+		if out, err := git(ctx, root, "for-each-ref", "refs/heads", "refs/remotes", "--format=%(refname)%09%(refname:short)%09%(objectname:short)%09%(committerdate:relative)%09%(upstream:short)"); err == nil {
+			refsOut, refsOK = out, true
+		} else {
+			warn(err)
+		}
+	})
+	run(func() {
+		if out, err := git(ctx, root, "remote", "-v"); err == nil {
+			state.Remotes = parseRemotes(out)
+		} else {
+			warn(err)
+		}
+	})
+	run(func() {
+		if out, err := git(ctx, root, "stash", "list", "--date=relative", "--pretty=format:%gd|%cr|%s"); err == nil {
+			state.Stashes = parseStashes(out)
+		} else {
+			warn(err)
+		}
+	})
+	run(func() {
+		if op, err := detectOperation(ctx, root); err == nil {
+			state.Operation = op
+		} else {
+			warn(err)
+		}
+	})
 
-	if staged, worktree, err := collectDiffs(ctx, root); err == nil {
-		state.StagedDiff = diffLines(staged)
-		state.WorktreeDiff = diffLines(worktree)
-		state.Diff = combineDiffs(state.StagedDiff, state.WorktreeDiff)
-	} else {
-		state.Warnings = append(state.Warnings, err.Error())
-	}
+	wg.Wait()
 
-	if out, err := git(ctx, root, "for-each-ref", "refs/heads", "refs/remotes", "--format=%(refname)%09%(refname:short)%09%(objectname:short)%09%(committerdate:relative)%09%(upstream:short)"); err == nil {
-		state.Refs = parseRefs(out, state.Branch)
-	} else {
-		state.Warnings = append(state.Warnings, err.Error())
+	if statusOK {
+		parseStatus(statusOut, &state)
 	}
-
-	if out, err := git(ctx, root, "remote", "-v"); err == nil {
-		state.Remotes = parseRemotes(out)
-	} else {
-		state.Warnings = append(state.Warnings, err.Error())
-	}
-
-	if out, err := git(ctx, root, "stash", "list", "--date=relative", "--pretty=format:%gd|%cr|%s"); err == nil {
-		state.Stashes = parseStashes(out)
-	} else {
-		state.Warnings = append(state.Warnings, err.Error())
-	}
-
-	if op, err := detectOperation(ctx, root); err == nil {
-		state.Operation = op
-	} else {
-		state.Warnings = append(state.Warnings, err.Error())
+	if refsOK {
+		state.Refs = parseRefs(refsOut, state.Branch)
 	}
 
 	return state, nil
