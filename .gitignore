@@ -9,6 +9,9 @@
 *.so
 *.dylib
 
+# Local build output (see docs/release.md)
+/tmp/
+
 # Test binary, built with `go test -c`
 *.test
 

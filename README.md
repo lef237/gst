@@ -28,7 +28,7 @@ go run ./cmd/gst
 To build a local binary:
 
 ```sh
-go build -o ~/tmp/gst ./cmd/gst
+go build -o tmp/gst ./cmd/gst
 ```
 
 Release steps are documented in [docs/release.md](docs/release.md).

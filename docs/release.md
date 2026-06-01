@@ -38,13 +38,13 @@ Run the test suite and build a local binary:
 
 ```sh
 go test ./...
-go build -o ~/tmp/gst ./cmd/gst
+go build -o tmp/gst ./cmd/gst
 ```
 
 Smoke-test the binary from a Git repository:
 
 ```sh
-~/tmp/gst --once
+tmp/gst --once
 ```
 
 ## Tag Release
@@ -75,34 +75,37 @@ go install github.com/lef237/gst/cmd/gst@latest
 
 ## Optional Binary Assets
 
-Build release binaries into a fresh `~/tmp/gst-release` directory. If an old
+Build release binaries into a fresh `tmp/gst-release` directory. If an old
 directory is present, discard it first:
 
 ```sh
-trash ~/tmp/gst-release
+trash tmp/gst-release
 ```
 
-Then build the assets:
+Then build the assets. Pass the tag through `-ldflags` so the binaries report
+the right version from `gst --version` (binaries built this way carry no module
+version otherwise, unlike `go install`):
 
 ```sh
-mkdir -p ~/tmp/gst-release
+mkdir -p tmp/gst-release
 
-GOOS=darwin GOARCH=arm64 go build -o ~/tmp/gst-release/gst-darwin-arm64 ./cmd/gst
-GOOS=darwin GOARCH=amd64 go build -o ~/tmp/gst-release/gst-darwin-amd64 ./cmd/gst
-GOOS=linux GOARCH=amd64 go build -o ~/tmp/gst-release/gst-linux-amd64 ./cmd/gst
-GOOS=windows GOARCH=amd64 go build -o ~/tmp/gst-release/gst-windows-amd64.exe ./cmd/gst
+LDFLAGS="-X main.version=v0.1.0"
+GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o tmp/gst-release/gst-darwin-arm64 ./cmd/gst
+GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o tmp/gst-release/gst-darwin-amd64 ./cmd/gst
+GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o tmp/gst-release/gst-linux-amd64 ./cmd/gst
+GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o tmp/gst-release/gst-windows-amd64.exe ./cmd/gst
 ```
 
 Create checksums:
 
 ```sh
-shasum -a 256 ~/tmp/gst-release/* > ~/tmp/gst-release/checksums.txt
+shasum -a 256 tmp/gst-release/* > tmp/gst-release/checksums.txt
 ```
 
 Create the GitHub Release and attach the binaries:
 
 ```sh
-gh release create v0.1.0 ~/tmp/gst-release/* \
+gh release create v0.1.0 tmp/gst-release/* \
   --title "v0.1.0" \
   --notes "See README.md for installation and usage."
 ```
@@ -110,15 +113,15 @@ gh release create v0.1.0 ~/tmp/gst-release/* \
 After the release is complete, the generated directory can be discarded:
 
 ```sh
-trash ~/tmp/gst-release
+trash tmp/gst-release
 ```
 
 ## Release Checklist
 
 - Working tree is clean.
 - `go test ./...` passes.
-- `go build -o ~/tmp/gst ./cmd/gst` succeeds.
-- `~/tmp/gst --once` runs in a Git repository.
+- `go build -o tmp/gst ./cmd/gst` succeeds.
+- `tmp/gst --once` runs in a Git repository.
 - The release tag follows semver, such as `v0.1.0`.
 - The tag has been pushed to GitHub.
 - Optional GitHub Release assets and `checksums.txt` are attached.

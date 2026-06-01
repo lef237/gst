@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -15,8 +16,23 @@ import (
 	"github.com/lef237/gst/internal/ui"
 )
 
+// version is overridable at build time with
+// -ldflags "-X main.version=v0.1.0"; otherwise it is read from the module
+// build info so `go install ...@v0.1.0` reports the installed tag.
+var version = ""
+
 func main() {
 	os.Exit(run(os.Args[1:]))
+}
+
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
 }
 
 func run(args []string) int {
@@ -34,7 +50,7 @@ func run(args []string) int {
 	}
 
 	if *version {
-		fmt.Println("gst dev")
+		fmt.Println("gst " + buildVersion())
 		return 0
 	}
 
@@ -72,7 +88,7 @@ func run(args []string) int {
 		return 1
 	}
 
-	ticker := time.NewTicker(maxDuration(*interval, 500*time.Millisecond))
+	ticker := time.NewTicker(max(*interval, 500*time.Millisecond))
 	defer ticker.Stop()
 	keys := readKeys(ctx)
 	active := ui.TabOverview
@@ -316,34 +332,6 @@ func sttySize() (termSize, bool) {
 func isTerminal(f *os.File) bool {
 	info, err := f.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
-func maxDuration(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func dim(color bool, s string) string {
-	if !color {
-		return s
-	}
-	return "\x1b[2m" + s + "\x1b[0m"
 }
 
 func enableCBreakMode() (func(), error) {
