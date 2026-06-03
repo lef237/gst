@@ -259,6 +259,34 @@ func TestCollectHeadDiffIncludesUntrackedOnlyFiles(t *testing.T) {
 	}
 }
 
+func TestCollectHeadDiffOmitsUntrackedBinaryContents(t *testing.T) {
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "tracked.txt")
+	runGit(t, root, "commit", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(root, "image.bin"), []byte{0x00, 0x01, 0x02, 0xff}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	headDiff := strings.Join(state.HeadDiff, "\n")
+	if !strings.Contains(headDiff, "Binary files") {
+		t.Fatalf("head diff should mention omitted binary file contents:\n%s", headDiff)
+	}
+	for _, unwanted := range []string{"GIT binary patch", "literal "} {
+		if strings.Contains(headDiff, unwanted) {
+			t.Fatalf("head diff should omit binary patch content %q:\n%s", unwanted, headDiff)
+		}
+	}
+}
+
 func TestCollectHeadDiffIncludesInitialStagedAndUntrackedFiles(t *testing.T) {
 	root := initTestRepo(t)
 	if err := os.WriteFile(filepath.Join(root, "staged.txt"), []byte("staged\n"), 0o644); err != nil {

@@ -243,7 +243,7 @@ func collectDiffs(ctx context.Context, root string) (string, string, string, err
 		}
 		return cached, worktree, joinRawDiffs(cached, worktree, untracked), nil
 	}
-	trackedHead, err := git(ctx, root, "diff", "HEAD", "--binary", "--no-ext-diff", "--unified=3")
+	trackedHead, err := git(ctx, root, "diff", "HEAD", "--no-ext-diff", "--unified=3")
 	if err != nil {
 		return "", "", "", err
 	}
@@ -262,7 +262,7 @@ func collectUntrackedDiff(ctx context.Context, root string) (string, error) {
 
 	var diffs []string
 	for _, path := range nulSeparated(out) {
-		diff, err := gitWithAllowedExitCodes(ctx, root, []int{1}, "diff", "--binary", "--no-ext-diff", "--unified=3", "--no-index", "--", "/dev/null", path)
+		diff, err := gitWithAllowedExitCodes(ctx, root, []int{1}, "diff", "--no-ext-diff", "--unified=3", "--no-index", "--", "/dev/null", path)
 		if err != nil {
 			return "", err
 		}

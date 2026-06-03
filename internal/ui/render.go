@@ -698,7 +698,7 @@ func diffLineAt(diff []string, mode, next string, width, index int, opts Options
 	case 0:
 		return color(opts, fmt.Sprintf("mode: %s diff, press s to show %s diff", mode, next), cyanBold)
 	case 1:
-		return color(opts, "copy: y worktree, i staged, a full patch; s toggles view", dim)
+		return color(opts, "copy: y worktree, i staged, a full text patch; binary omitted", dim)
 	}
 	diffIndex := index - 2
 	if diffIndex < 0 || diffIndex >= len(diff) {
@@ -931,7 +931,8 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"s         toggle staged/worktree diff on diff view",
 		"y         copy worktree diff on diff view",
 		"i         copy staged/index diff on diff view",
-		"a         copy full patch on diff view; toggle --all on graph view",
+		"a         copy full text patch on diff view; binary contents omitted",
+		"          toggle --all on graph view",
 		"1-8       jump to a view directly",
 		"?         open this help view",
 		"t         toggle native git status",
