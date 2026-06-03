@@ -65,7 +65,7 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 		if opts.GraphAll {
 			title = "commit graph --all"
 		}
-		out.WriteString(scrollPanel(title, graphTabLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		out.WriteString(graphScrollPanel(title, state, opts.Width, bodyHeight, opts))
 	case TabFiles:
 		out.WriteString(scrollPanel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabDiff:
@@ -73,7 +73,7 @@ func RenderTab(state gitstate.State, active Tab, opts Options) string {
 		if opts.DiffStaged {
 			title = "diff staged"
 		}
-		out.WriteString(scrollPanel(title, diffLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		out.WriteString(diffScrollPanel(title, state, opts.Width, bodyHeight, opts))
 	case TabBranches:
 		out.WriteString(scrollPanel("branches", branchLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
 	case TabStash:
@@ -102,11 +102,11 @@ func MaxScroll(state gitstate.State, active Tab, opts Options) int {
 	rows := bodyHeight - 2
 	switch active {
 	case TabGraph:
-		return max(0, len(graphTabLines(state, opts.Width-4, opts))-rows)
+		return max(0, graphTabLineCount(state)-rows)
 	case TabFiles:
 		return max(0, len(fileLines(state, opts.Width-4, opts))-rows)
 	case TabDiff:
-		return max(0, len(diffLines(state, opts.Width-4, opts))-rows)
+		return max(0, diffLineCount(state, opts)-rows)
 	case TabBranches:
 		return max(0, len(branchLines(state, opts.Width-4, opts))-rows)
 	case TabStash:
@@ -449,25 +449,75 @@ func graphLines(state gitstate.State, width int, opts Options) []string {
 	return lines
 }
 
-func graphTabLines(state gitstate.State, width int, opts Options) []string {
-	lines := make([]string, 0, len(state.Graph)+2)
-	if opts.GraphAll {
-		lines = append(lines,
-			color(opts, truncate("mode: detailed --all", width), yellow),
-			color(opts, truncate("press a to return to normal branch graph", width), dim),
-			"",
-		)
-	} else {
-		lines = append(lines,
-			color(opts, truncate("mode: normal branch graph", width), cyanBold),
-			color(opts, truncate("press a to show detailed --all graph, including stash/internal refs", width), yellow),
-			"",
-		)
+func graphLineCount(state gitstate.State) int {
+	if len(state.Graph) == 0 {
+		return 1
 	}
-	return append(lines, graphLines(state, width, opts)...)
+	return len(state.Graph)
+}
+
+func graphLineAt(state gitstate.State, width, index int, opts Options) string {
+	if len(state.Graph) == 0 {
+		return color(opts, "no commits yet", dim)
+	}
+	if index < 0 || index >= len(state.Graph) {
+		return ""
+	}
+	return colorGraph(truncate(state.Graph[index], width), opts)
+}
+
+func graphTabLines(state gitstate.State, width int, opts Options) []string {
+	lines := make([]string, 0, graphTabLineCount(state))
+	for i := 0; i < graphTabLineCount(state); i++ {
+		lines = append(lines, graphTabLineAt(state, width, i, opts))
+	}
+	return lines
+}
+
+func graphTabLineCount(state gitstate.State) int {
+	return 3 + graphLineCount(state)
+}
+
+func graphTabLineAt(state gitstate.State, width, index int, opts Options) string {
+	if opts.GraphAll {
+		switch index {
+		case 0:
+			return color(opts, truncate("mode: detailed --all", width), yellow)
+		case 1:
+			return color(opts, truncate("press a to return to normal branch graph", width), dim)
+		case 2:
+			return ""
+		}
+	} else {
+		switch index {
+		case 0:
+			return color(opts, truncate("mode: normal branch graph", width), cyanBold)
+		case 1:
+			return color(opts, truncate("press a to show detailed --all graph, including stash/internal refs", width), yellow)
+		case 2:
+			return ""
+		}
+	}
+	return graphLineAt(state, width, index-3, opts)
+}
+
+func graphScrollPanel(title string, state gitstate.State, width, maxHeight int, opts Options) string {
+	lineWidth := width - 4
+	return scrollPanelFromSource(title, graphTabLineCount(state), func(index int) string {
+		return graphTabLineAt(state, lineWidth, index, opts)
+	}, width, maxHeight, opts)
 }
 
 func diffLines(state gitstate.State, width int, opts Options) []string {
+	diff, mode, next := selectedDiff(state, opts)
+	lines := make([]string, 0, diffDisplayLineCount(diff))
+	for i := 0; i < diffDisplayLineCount(diff); i++ {
+		lines = append(lines, diffLineAt(diff, mode, next, width, i, opts))
+	}
+	return lines
+}
+
+func selectedDiff(state gitstate.State, opts Options) ([]string, string, string) {
 	diff := state.WorktreeDiff
 	mode := "worktree"
 	next := "staged"
@@ -476,18 +526,51 @@ func diffLines(state gitstate.State, width int, opts Options) []string {
 		mode = "staged"
 		next = "worktree"
 	}
+	return diff, mode, next
+}
+
+func diffLineCount(state gitstate.State, opts Options) int {
+	diff, _, _ := selectedDiff(state, opts)
+	return diffDisplayLineCount(diff)
+}
+
+func diffDisplayLineCount(diff []string) int {
 	if len(diff) == 0 {
-		return []string{color(opts, fmt.Sprintf("no %s diff", mode), green), color(opts, fmt.Sprintf("press s to show %s diff", next), dim)}
+		return 2
 	}
-	lines := make([]string, 0, len(diff)+2)
-	lines = append(lines,
-		color(opts, fmt.Sprintf("mode: %s diff, press s to show %s diff", mode, next), cyanBold),
-		color(opts, "j/k line, d/u half page, f/b page", dim),
-	)
-	for _, line := range diff {
-		lines = append(lines, colorDiffLine(truncate(expandTabs(line, 8), width), opts))
+	return len(diff) + 2
+}
+
+func diffLineAt(diff []string, mode, next string, width, index int, opts Options) string {
+	if len(diff) == 0 {
+		switch index {
+		case 0:
+			return color(opts, fmt.Sprintf("no %s diff", mode), green)
+		case 1:
+			return color(opts, fmt.Sprintf("press s to show %s diff", next), dim)
+		default:
+			return ""
+		}
 	}
-	return lines
+	switch index {
+	case 0:
+		return color(opts, fmt.Sprintf("mode: %s diff, press s to show %s diff", mode, next), cyanBold)
+	case 1:
+		return color(opts, "j/k line, d/u half page, f/b page", dim)
+	}
+	diffIndex := index - 2
+	if diffIndex < 0 || diffIndex >= len(diff) {
+		return ""
+	}
+	return colorDiffLine(truncate(expandTabs(diff[diffIndex], 8), width), opts)
+}
+
+func diffScrollPanel(title string, state gitstate.State, width, maxHeight int, opts Options) string {
+	diff, mode, next := selectedDiff(state, opts)
+	lineWidth := width - 4
+	return scrollPanelFromSource(title, diffDisplayLineCount(diff), func(index int) string {
+		return diffLineAt(diff, mode, next, lineWidth, index, opts)
+	}, width, maxHeight, opts)
 }
 
 func fileLines(state gitstate.State, width int, opts Options) []string {
@@ -797,6 +880,27 @@ func scrollPanel(title string, lines []string, width, maxHeight int, opts Option
 		displayTitle = fmt.Sprintf("%s %d-%d/%d", title, start, end, len(lines))
 	}
 	return panel(displayTitle, sliceLines(lines, scroll, contentRows), width, maxHeight, opts)
+}
+
+func scrollPanelFromSource(title string, total int, lineAt func(int) string, width, maxHeight int, opts Options) string {
+	if maxHeight < 3 {
+		maxHeight = 3
+	}
+	contentRows := maxHeight - 2
+	scroll := clampScroll(opts.Scroll, total, contentRows)
+	displayTitle := title
+	if total > contentRows {
+		start := scroll + 1
+		end := min(total, scroll+contentRows)
+		displayTitle = fmt.Sprintf("%s %d-%d/%d", title, start, end, total)
+	}
+
+	visibleRows := min(contentRows, max(0, total-scroll))
+	lines := make([]string, 0, visibleRows)
+	for i := 0; i < visibleRows; i++ {
+		lines = append(lines, lineAt(scroll+i))
+	}
+	return panel(displayTitle, lines, width, maxHeight, opts)
 }
 
 func sliceLines(lines []string, scroll, rows int) []string {

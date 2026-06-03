@@ -66,6 +66,9 @@ func run(args []string) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	resizes := make(chan os.Signal, 1)
+	stopResize := notifyResize(resizes)
+	defer stopResize()
 	restoreInput, err := enableCBreakMode()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gst: %v\n", err)
@@ -105,7 +108,6 @@ func run(args []string) int {
 	forceDraw := true
 
 	for {
-		width, height = terminalSize()
 		renderOpts := ui.Options{Color: color, Width: width, Height: height, Interactive: true, GraphAll: graphAll, DiffStaged: diffStaged, Scroll: scrolls[active]}
 		frame := ""
 		if nativeStatus {
@@ -243,6 +245,12 @@ func run(args []string) int {
 			}
 		case <-ticker.C:
 			needsRefresh = true
+		case <-resizes:
+			nextWidth, nextHeight := terminalSize()
+			if nextWidth != width || nextHeight != height {
+				width, height = nextWidth, nextHeight
+				forceDraw = true
+			}
 		}
 	}
 }
@@ -359,15 +367,18 @@ func leaveTUI() {
 }
 
 func drawFrame(frame string) {
-	fmt.Print("\x1b[H")
+	var out strings.Builder
+	out.Grow(len(frame) + 16)
+	out.WriteString("\x1b[H")
 	for i, line := range strings.Split(frame, "\n") {
 		if i > 0 {
-			fmt.Print("\n")
+			out.WriteString("\n")
 		}
-		fmt.Print("\x1b[2K")
-		fmt.Print(line)
+		out.WriteString("\x1b[2K")
+		out.WriteString(line)
 	}
-	fmt.Print("\x1b[J")
+	out.WriteString("\x1b[J")
+	fmt.Print(out.String())
 }
 
 func stty(args ...string) (string, error) {
