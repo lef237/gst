@@ -124,3 +124,39 @@ func TestCanScrollListTabs(t *testing.T) {
 		t.Fatal("native status mode keeps its own static view")
 	}
 }
+
+func TestDiffClipboardPayloads(t *testing.T) {
+	state := gitstate.State{
+		StagedDiff: []string{
+			"diff --git a/file.txt b/file.txt",
+			"+staged",
+		},
+		WorktreeDiff: []string{
+			"diff --git a/file.txt b/file.txt",
+			"+worktree",
+		},
+	}
+
+	label, text := diffClipboardPayload(state, copyWorktreeDiff)
+	if label != "worktree diff" || text != "diff --git a/file.txt b/file.txt\n+worktree\n" {
+		t.Fatalf("worktree payload = %q, %q", label, text)
+	}
+
+	label, text = diffClipboardPayload(state, copyStagedDiff)
+	if label != "staged diff" || text != "diff --git a/file.txt b/file.txt\n+staged\n" {
+		t.Fatalf("staged payload = %q, %q", label, text)
+	}
+
+	label, text = diffClipboardPayload(state, copyAllDiffs)
+	want := "diff --git a/file.txt b/file.txt\n+staged\n\ndiff --git a/file.txt b/file.txt\n+worktree\n"
+	if label != "all diffs" || text != want {
+		t.Fatalf("all payload = %q, %q", label, text)
+	}
+}
+
+func TestDiffClipboardPayloadEmpty(t *testing.T) {
+	_, text := diffClipboardPayload(gitstate.State{}, copyAllDiffs)
+	if text != "" {
+		t.Fatalf("empty all-diff payload = %q, want empty", text)
+	}
+}

@@ -83,13 +83,21 @@ func TestRenderDiffTab(t *testing.T) {
 	}
 
 	out := RenderTab(state, TabDiff, Options{Width: 90, Height: 12, Interactive: true})
-	if !strings.Contains(out, "[4:diff]") || !strings.Contains(out, "mode: worktree diff") || !strings.Contains(out, "+newer") {
+	if !strings.Contains(out, "[4:diff]") || !strings.Contains(out, "mode: worktree diff") || !strings.Contains(out, "+newer") || !strings.Contains(out, "copy: y worktree") {
 		t.Fatalf("diff tab did not render worktree patch:\n%s", out)
 	}
 
 	staged := RenderTab(state, TabDiff, Options{Width: 90, Height: 12, Interactive: true, DiffStaged: true})
 	if !strings.Contains(staged, "diff staged") || !strings.Contains(staged, "mode: staged diff") || !strings.Contains(staged, "+new") {
 		t.Fatalf("diff tab did not render staged patch:\n%s", staged)
+	}
+}
+
+func TestRenderNoticeInTabBar(t *testing.T) {
+	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
+	out := RenderTab(state, TabDiff, Options{Width: 80, Height: 10, Interactive: true, Notice: "copied worktree diff"})
+	if !strings.Contains(out, "copied worktree diff") {
+		t.Fatalf("notice was not rendered:\n%s", out)
 	}
 }
 

@@ -18,6 +18,7 @@ type Options struct {
 	GraphAll    bool
 	DiffStaged  bool
 	Scroll      int
+	Notice      string
 }
 
 type Tab int
@@ -242,7 +243,10 @@ func tabBar(active Tab, opts Options) string {
 			compactHelp = " f/b page  d/u half  j/k line  a normal  ? help  q quit"
 		}
 	} else if active == TabDiff {
-		compactHelp = " s staged/worktree  f/b page  d/u half  j/k line  ? help  q quit"
+		compactHelp = " y/i/a copy  s staged/worktree  f/b d/u j/k  ? help  q quit"
+	}
+	if opts.Notice != "" {
+		return tabBarNotice(active, tabs, line, opts)
 	}
 	if visibleLen(line)+visibleLen(compactHelp) <= opts.Width {
 		return line + color(opts, compactHelp, dim)
@@ -254,12 +258,25 @@ func tabBar(active Tab, opts Options) string {
 	return compactTabBar(active, tabs, opts)
 }
 
+func tabBarNotice(active Tab, tabs []string, fullLine string, opts Options) string {
+	notice := " " + opts.Notice
+	if visibleLen(fullLine)+visibleLen(notice) <= opts.Width {
+		return fullLine + color(opts, notice, yellow)
+	}
+
+	label := fmt.Sprintf("[%d:%s]", int(active)+1, tabs[int(active)])
+	if visibleLen(label)+visibleLen(notice) <= opts.Width {
+		return color(opts, label, cyanBold) + color(opts, notice, yellow)
+	}
+	return color(opts, truncate(opts.Notice, opts.Width), yellow)
+}
+
 func compactTabBar(active Tab, tabs []string, opts Options) string {
 	controls := " tab arrows ? t q"
 	if active == TabGraph {
 		controls = " f/b d/u j/k ? a q"
 	} else if active == TabDiff {
-		controls = " s f/b d/u j/k ? q"
+		controls = " y/i/a s f/b d/u j/k ? q"
 	}
 	prefix := fmt.Sprintf("[%d/%d ", int(active)+1, len(tabs))
 	suffix := "]"
@@ -556,7 +573,7 @@ func diffLineAt(diff []string, mode, next string, width, index int, opts Options
 	case 0:
 		return color(opts, fmt.Sprintf("mode: %s diff, press s to show %s diff", mode, next), cyanBold)
 	case 1:
-		return color(opts, "j/k line, d/u half page, f/b page", dim)
+		return color(opts, "copy: y worktree, i staged, a all; s toggles view", dim)
 	}
 	diffIndex := index - 2
 	if diffIndex < 0 || diffIndex >= len(diff) {
@@ -781,17 +798,19 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"tab       move to the next view",
 		"right     move to the next view",
 		"left      move to the previous view",
+		"q         quit",
 		"j/k       scroll graph and diff by one line",
 		"d/u       scroll graph and diff by half a page",
 		"f/b       scroll graph and diff by one page",
 		"page keys scroll graph and diff by one page",
 		"s         toggle staged/worktree diff on diff view",
+		"y         copy worktree diff on diff view",
+		"i         copy staged/index diff on diff view",
+		"a         copy all diffs on diff view; toggle --all on graph view",
 		"1-8       jump to a view directly",
 		"?         open this help view",
 		"t         toggle native git status",
-		"a         toggle --all detail mode on graph view",
 		"r         refresh immediately",
-		"q         quit",
 		"",
 		color(opts, "views", cyanBold),
 		"overview  sync, workspace, changed files, and recent graph",

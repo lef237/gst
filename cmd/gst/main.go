@@ -106,9 +106,10 @@ func run(args []string) int {
 	needsRefresh := true
 	lastFrame := ""
 	forceDraw := true
+	notice := ""
 
 	for {
-		renderOpts := ui.Options{Color: color, Width: width, Height: height, Interactive: true, GraphAll: graphAll, DiffStaged: diffStaged, Scroll: scrolls[active]}
+		renderOpts := ui.Options{Color: color, Width: width, Height: height, Interactive: true, GraphAll: graphAll, DiffStaged: diffStaged, Scroll: scrolls[active], Notice: notice}
 		frame := ""
 		if nativeStatus {
 			if needsRefresh || !nativeReady {
@@ -154,6 +155,10 @@ func run(args []string) int {
 		case key, ok := <-keys:
 			if !ok {
 				return 0
+			}
+			if notice != "" {
+				notice = ""
+				forceDraw = true
 			}
 			switch key {
 			case "q", "Q", "\x03":
@@ -223,11 +228,24 @@ func run(args []string) int {
 					stateReady = false
 					needsRefresh = true
 					forceDraw = true
+				} else if active == ui.TabDiff && !nativeStatus {
+					notice = copyDiff(ctx, state, copyAllDiffs)
+					forceDraw = true
 				}
 			case "s", "S":
 				if active == ui.TabDiff && !nativeStatus {
 					diffStaged = !diffStaged
 					scrolls[ui.TabDiff] = 0
+					forceDraw = true
+				}
+			case "y", "Y":
+				if active == ui.TabDiff && !nativeStatus {
+					notice = copyDiff(ctx, state, copyWorktreeDiff)
+					forceDraw = true
+				}
+			case "i", "I":
+				if active == ui.TabDiff && !nativeStatus {
+					notice = copyDiff(ctx, state, copyStagedDiff)
 					forceDraw = true
 				}
 			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
@@ -284,6 +302,53 @@ func canScroll(active ui.Tab, native bool) bool {
 		return false
 	}
 	return active != ui.TabOverview
+}
+
+type diffCopyTarget int
+
+const (
+	copyWorktreeDiff diffCopyTarget = iota
+	copyStagedDiff
+	copyAllDiffs
+)
+
+func copyDiff(ctx context.Context, state gitstate.State, target diffCopyTarget) string {
+	label, text := diffClipboardPayload(state, target)
+	if text == "" {
+		return "nothing to copy: " + label + " is empty"
+	}
+
+	copyCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := writeClipboard(copyCtx, text); err != nil {
+		return "copy failed: " + err.Error()
+	}
+	return "copied " + label
+}
+
+func diffClipboardPayload(state gitstate.State, target diffCopyTarget) (string, string) {
+	switch target {
+	case copyStagedDiff:
+		return "staged diff", joinDiffSections(state.StagedDiff)
+	case copyAllDiffs:
+		return "all diffs", joinDiffSections(state.StagedDiff, state.WorktreeDiff)
+	default:
+		return "worktree diff", joinDiffSections(state.WorktreeDiff)
+	}
+}
+
+func joinDiffSections(sections ...[]string) string {
+	var chunks []string
+	for _, section := range sections {
+		if len(section) == 0 {
+			continue
+		}
+		chunks = append(chunks, strings.Join(section, "\n"))
+	}
+	if len(chunks) == 0 {
+		return ""
+	}
+	return strings.Join(chunks, "\n\n") + "\n"
 }
 
 func pageStep(height int) int {
