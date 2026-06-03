@@ -359,9 +359,9 @@ func tabKeyItems(active Tab, opts Options) []string {
 		return []string{strings.ReplaceAll(mode, " ", ":"), "j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "t:native", "?:help", "r:refresh", "q:quit"}
 	case TabDiff:
 		if compact {
-			return []string{"y:wt", "i:stg", "a:all", "s:toggle", "j/k", "d/u", "f/b", "left/right:tabs", "?", "r", "q"}
+			return []string{"y:wt", "i:stg", "a:full", "s:toggle", "j/k", "d/u", "f/b", "left/right:tabs", "?", "r", "q"}
 		}
-		return []string{"y:copy-worktree", "i:copy-staged", "a:copy-all", "s:toggle", "j/k:line", "d/u:half", "f/b:page", "left/right:tabs", "?:help", "r:refresh", "q:quit"}
+		return []string{"y:copy-worktree", "i:copy-staged", "a:copy-full", "s:toggle", "j/k:line", "d/u:half", "f/b:page", "left/right:tabs", "?:help", "r:refresh", "q:quit"}
 	case TabHelp:
 		if compact {
 			return []string{"j/k", "d/u", "f/b", "left/right", "1-8", "q"}
@@ -698,7 +698,7 @@ func diffLineAt(diff []string, mode, next string, width, index int, opts Options
 	case 0:
 		return color(opts, fmt.Sprintf("mode: %s diff, press s to show %s diff", mode, next), cyanBold)
 	case 1:
-		return color(opts, "copy: y worktree, i staged, a all; s toggles view", dim)
+		return color(opts, "copy: y worktree, i staged, a full patch; s toggles view", dim)
 	}
 	diffIndex := index - 2
 	if diffIndex < 0 || diffIndex >= len(diff) {
@@ -931,7 +931,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"s         toggle staged/worktree diff on diff view",
 		"y         copy worktree diff on diff view",
 		"i         copy staged/index diff on diff view",
-		"a         copy all diffs on diff view; toggle --all on graph view",
+		"a         copy full patch on diff view; toggle --all on graph view",
 		"1-8       jump to a view directly",
 		"?         open this help view",
 		"t         toggle native git status",

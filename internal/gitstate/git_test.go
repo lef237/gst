@@ -223,6 +223,12 @@ func TestCollectDiffIncludesStagedAndWorktreeDiffs(t *testing.T) {
 			t.Fatalf("diff missing %q:\n%s", want, diff)
 		}
 	}
+	headDiff := strings.Join(state.HeadDiff, "\n")
+	for _, want := range []string{"-one", "+three"} {
+		if !strings.Contains(headDiff, want) {
+			t.Fatalf("head diff missing %q:\n%s", want, headDiff)
+		}
+	}
 }
 
 func TestCollectEmptyRepoDoesNotWarnAboutMissingHead(t *testing.T) {

@@ -32,6 +32,7 @@ type State struct {
 	Diff         []string
 	StagedDiff   []string
 	WorktreeDiff []string
+	HeadDiff     []string
 	Graph        []string
 	Refs         []Ref
 	Remotes      []Remote
@@ -136,9 +137,10 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 		}
 	})
 	run(func() {
-		if staged, worktree, err := collectDiffs(ctx, root); err == nil {
+		if staged, worktree, head, err := collectDiffs(ctx, root); err == nil {
 			state.StagedDiff = diffLines(staged)
 			state.WorktreeDiff = diffLines(worktree)
+			state.HeadDiff = diffLines(head)
 			state.Diff = combineDiffs(state.StagedDiff, state.WorktreeDiff)
 		} else {
 			warn(err)
@@ -221,16 +223,27 @@ func hasHeadCommit(ctx context.Context, root string) (bool, error) {
 	return false, err
 }
 
-func collectDiffs(ctx context.Context, root string) (string, string, error) {
+func collectDiffs(ctx context.Context, root string) (string, string, string, error) {
 	cached, err := git(ctx, root, "diff", "--cached", "--no-ext-diff", "--unified=3")
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	worktree, err := git(ctx, root, "diff", "--no-ext-diff", "--unified=3")
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return cached, worktree, nil
+	hasHead, err := hasHeadCommit(ctx, root)
+	if err != nil {
+		return "", "", "", err
+	}
+	if !hasHead {
+		return cached, worktree, "", nil
+	}
+	head, err := git(ctx, root, "diff", "HEAD", "--no-ext-diff", "--unified=3")
+	if err != nil {
+		return "", "", "", err
+	}
+	return cached, worktree, head, nil
 }
 
 func NativeStatus(ctx context.Context, dir string, color bool) (string, error) {

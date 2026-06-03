@@ -108,7 +108,7 @@ func TestRenderTabFooterShowsCurrentKeys(t *testing.T) {
 	if len(lines) != 12 {
 		t.Fatalf("rendered %d lines, want exactly 12:\n%s", len(lines), out)
 	}
-	for _, want := range []string{"[keys]", "s:toggle", "y:copy-worktree", "i:copy-staged", "a:copy-all"} {
+	for _, want := range []string{"[keys]", "s:toggle", "y:copy-worktree", "i:copy-staged", "a:copy-full"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("footer missing %q:\n%s", want, out)
 		}
@@ -129,7 +129,7 @@ func TestRenderTabFooterWrapsOnNarrowWidth(t *testing.T) {
 	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
 	out := RenderTab(state, TabDiff, Options{Width: 30, Height: 10, Interactive: true})
 	assertFits(t, out, 30, 10)
-	for _, want := range []string{"[keys]", "y:wt", "i:stg", "a:all"} {
+	for _, want := range []string{"[keys]", "y:wt", "i:stg", "a:full"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("narrow footer missing %q:\n%s", want, out)
 		}

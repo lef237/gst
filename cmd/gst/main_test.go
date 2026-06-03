@@ -135,9 +135,15 @@ func TestDiffClipboardPayloads(t *testing.T) {
 			"diff --git a/file.txt b/file.txt",
 			"+worktree",
 		},
+		HeadDiff: []string{
+			"diff --git a/file.txt b/file.txt",
+			"+final",
+		},
 	}
 
-	label, text := diffClipboardPayload(state, copyWorktreeDiff)
+	worktreeOnly := state
+	worktreeOnly.StagedDiff = nil
+	label, text := diffClipboardPayload(worktreeOnly, copyWorktreeDiff)
 	if label != "worktree diff" || text != "diff --git a/file.txt b/file.txt\n+worktree\n" {
 		t.Fatalf("worktree payload = %q, %q", label, text)
 	}
@@ -148,9 +154,21 @@ func TestDiffClipboardPayloads(t *testing.T) {
 	}
 
 	label, text = diffClipboardPayload(state, copyAllDiffs)
-	want := "diff --git a/file.txt b/file.txt\n+staged\n\ndiff --git a/file.txt b/file.txt\n+worktree\n"
-	if label != "all diffs" || text != want {
+	want := "diff --git a/file.txt b/file.txt\n+final\n"
+	if label != "full diff" || text != want {
 		t.Fatalf("all payload = %q, %q", label, text)
+	}
+}
+
+func TestCopyWorktreeDiffRejectsIndexRelativePatch(t *testing.T) {
+	state := gitstate.State{
+		StagedDiff:   []string{"diff --git a/file.txt b/file.txt", "+staged"},
+		WorktreeDiff: []string{"diff --git a/file.txt b/file.txt", "+worktree"},
+	}
+
+	got := copyDiff(context.Background(), state, copyWorktreeDiff)
+	if !strings.Contains(got, "index-based") {
+		t.Fatalf("copy worktree with staged changes = %q", got)
 	}
 }
 
