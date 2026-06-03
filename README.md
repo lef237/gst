@@ -51,7 +51,8 @@ toggle native `git status`, `a` on the graph view to toggle the detailed
 diffs from the diff view with `y` for worktree, `i` for staged/index, or `a`
 for both. Less-like keys scroll graph, diff, and long list views: `j`/`k` for
 one line, `d`/`u` for half a page, and `f`/`b` for one page. Use `r` to
-refresh, and `q` to quit. The
+refresh, and `q` to quit. The current tab's available keys are always shown in
+the footer. The
 available views are:
 
 - `overview`

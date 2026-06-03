@@ -93,11 +93,46 @@ func TestRenderDiffTab(t *testing.T) {
 	}
 }
 
-func TestRenderNoticeInTabBar(t *testing.T) {
+func TestRenderNoticeInFooter(t *testing.T) {
 	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
 	out := RenderTab(state, TabDiff, Options{Width: 80, Height: 10, Interactive: true, Notice: "copied worktree diff"})
 	if !strings.Contains(out, "copied worktree diff") {
 		t.Fatalf("notice was not rendered:\n%s", out)
+	}
+}
+
+func TestRenderTabFooterShowsCurrentKeys(t *testing.T) {
+	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
+	out := RenderTab(state, TabDiff, Options{Width: 120, Height: 12, Interactive: true})
+	lines := strings.Split(out, "\n")
+	if len(lines) != 12 {
+		t.Fatalf("rendered %d lines, want exactly 12:\n%s", len(lines), out)
+	}
+	for _, want := range []string{"[keys]", "s:toggle", "y:copy-worktree", "i:copy-staged", "a:copy-all"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("footer missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderOverviewFooterUsesDescriptiveKeys(t *testing.T) {
+	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
+	out := RenderTab(state, TabOverview, Options{Width: 80, Height: 12, Interactive: true})
+	for _, want := range []string{"left/right:tabs", "t:native"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("overview footer missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderTabFooterWrapsOnNarrowWidth(t *testing.T) {
+	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
+	out := RenderTab(state, TabDiff, Options{Width: 30, Height: 10, Interactive: true})
+	assertFits(t, out, 30, 10)
+	for _, want := range []string{"[keys]", "y:wt", "i:stg", "a:all"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("narrow footer missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -360,8 +395,8 @@ func TestTruncateResetsActiveColor(t *testing.T) {
 
 func TestTabBarResponsiveModes(t *testing.T) {
 	wide := tabBar(TabBranches, Options{Width: 140})
-	if !strings.Contains(wide, "8:remote") || !strings.Contains(wide, "? help") || !strings.Contains(wide, "q quit") {
-		t.Fatalf("wide tab bar should include all tabs and compact help:\n%s", wide)
+	if !strings.Contains(wide, "8:remote") || !strings.Contains(wide, "[5:branches]") {
+		t.Fatalf("wide tab bar should include all tabs:\n%s", wide)
 	}
 	if visibleLen(wide) > 140 {
 		t.Fatalf("wide tab bar overflowed: %d\n%s", visibleLen(wide), wide)
@@ -376,8 +411,8 @@ func TestTabBarResponsiveModes(t *testing.T) {
 	}
 
 	narrow := tabBar(TabBranches, Options{Width: 30})
-	if !strings.Contains(narrow, "5/8") || !strings.Contains(narrow, "? t q") {
-		t.Fatalf("narrow tab bar should keep current tab and quit hint:\n%s", narrow)
+	if !strings.Contains(narrow, "5/8") || !strings.Contains(narrow, "branches") {
+		t.Fatalf("narrow tab bar should keep current tab:\n%s", narrow)
 	}
 	if visibleLen(narrow) > 30 {
 		t.Fatalf("narrow tab bar overflowed: %d\n%s", visibleLen(narrow), narrow)

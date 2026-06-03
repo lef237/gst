@@ -46,60 +46,68 @@ func Render(state gitstate.State, opts Options) string {
 func RenderTab(state gitstate.State, active Tab, opts Options) string {
 	opts = normalizeOptions(opts)
 
-	var out strings.Builder
-	out.WriteString(header(state, opts))
-	out.WriteString("\n")
-
-	bodyHeight := opts.Height - 2
+	prefix := []string{header(state, opts)}
 	if opts.Interactive {
-		out.WriteString(tabBar(active, opts))
-		out.WriteString("\n")
-		bodyHeight = opts.Height - 4
-	}
-	if bodyHeight < 6 {
-		bodyHeight = 6
+		prefix = append(prefix, tabBar(active, opts))
 	}
 
+	footer := footerLines(active, opts)
+	bodyHeight := tabBodyHeight(opts, len(footer))
+	body := renderTabBody(state, active, opts, bodyHeight)
+	if opts.Interactive {
+		return composeWithFooter(prefix, body, footer, opts.Height)
+	}
+
+	var out strings.Builder
+	for i, line := range prefix {
+		if i > 0 {
+			out.WriteString("\n")
+		}
+		out.WriteString(line)
+	}
+	out.WriteString("\n")
+	out.WriteString(body)
+	return trimToHeight(out.String(), opts.Height)
+}
+
+func renderTabBody(state gitstate.State, active Tab, opts Options, bodyHeight int) string {
 	switch active {
 	case TabGraph:
 		title := "commit graph"
 		if opts.GraphAll {
 			title = "commit graph --all"
 		}
-		out.WriteString(graphScrollPanel(title, state, opts.Width, bodyHeight, opts))
+		return graphScrollPanel(title, state, opts.Width, bodyHeight, opts)
 	case TabFiles:
-		out.WriteString(scrollPanel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		return scrollPanel("changed files", fileLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts)
 	case TabDiff:
 		title := "diff worktree"
 		if opts.DiffStaged {
 			title = "diff staged"
 		}
-		out.WriteString(diffScrollPanel(title, state, opts.Width, bodyHeight, opts))
+		return diffScrollPanel(title, state, opts.Width, bodyHeight, opts)
 	case TabBranches:
-		out.WriteString(scrollPanel("branches", branchLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		return scrollPanel("branches", branchLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts)
 	case TabStash:
-		out.WriteString(scrollPanel("stash", stashLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		return scrollPanel("stash", stashLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts)
 	case TabRefs:
-		out.WriteString(scrollPanel("refs", refLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		return scrollPanel("refs", refLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts)
 	case TabRemote:
-		out.WriteString(scrollPanel("repository notes", noteLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		return scrollPanel("repository notes", noteLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts)
 	case TabHelp:
-		out.WriteString(scrollPanel("help", helpLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts))
+		return scrollPanel("help", helpLines(state, opts.Width-4, opts), opts.Width, bodyHeight, opts)
 	default:
-		out.WriteString(overview(state, opts, bodyHeight))
+		return overview(state, opts, bodyHeight)
 	}
-	return trimToHeight(out.String(), opts.Height)
 }
 
 func MaxScroll(state gitstate.State, active Tab, opts Options) int {
 	opts = normalizeOptions(opts)
-	bodyHeight := opts.Height - 2
+	footerRows := 0
 	if opts.Interactive {
-		bodyHeight = opts.Height - 4
+		footerRows = len(footerLines(active, opts))
 	}
-	if bodyHeight < 6 {
-		bodyHeight = 6
-	}
+	bodyHeight := tabBodyHeight(opts, footerRows)
 	rows := bodyHeight - 2
 	switch active {
 	case TabGraph:
@@ -125,10 +133,24 @@ func MaxScroll(state gitstate.State, active Tab, opts Options) int {
 
 func RenderNativeStatus(status string, opts Options) string {
 	opts = normalizeOptions(opts)
+	var footer []string
+	bodyHeight := opts.Height - 2
+	if opts.Interactive {
+		footer = nativeStatusFooterLines(opts)
+		bodyHeight = opts.Height - 1 - len(footer)
+	}
+	if bodyHeight < 3 {
+		bodyHeight = 3
+	}
+	body := panel("git status", nativeStatusLines(status), opts.Width, bodyHeight, opts)
+	if opts.Interactive {
+		return composeWithFooter([]string{nativeStatusBar(opts)}, body, footer, opts.Height)
+	}
+
 	var out strings.Builder
 	out.WriteString(nativeStatusBar(opts))
 	out.WriteString("\n")
-	out.WriteString(panel("git status", nativeStatusLines(status), opts.Width, opts.Height-2, opts))
+	out.WriteString(body)
 	return trimToHeight(out.String(), opts.Height)
 }
 
@@ -140,6 +162,40 @@ func normalizeOptions(opts Options) Options {
 		opts.Height = 8
 	}
 	return opts
+}
+
+func tabBodyHeight(opts Options, footerRows int) int {
+	if opts.Interactive {
+		return max(3, opts.Height-2-footerRows)
+	}
+	if opts.Height-2 < 6 {
+		return 6
+	}
+	return opts.Height - 2
+}
+
+func composeWithFooter(prefix []string, body string, footer []string, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	lines := append([]string(nil), prefix...)
+	bodyLimit := max(0, height-len(lines)-len(footer))
+	lines = append(lines, blockLines(trimToHeight(body, bodyLimit))...)
+	for len(lines) < height-len(footer) {
+		lines = append(lines, "")
+	}
+	lines = append(lines, footer...)
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func blockLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(s, "\n"), "\n")
 }
 
 func overview(state gitstate.State, opts Options, bodyHeight int) string {
@@ -236,21 +292,6 @@ func tabBar(active Tab, opts Options) string {
 	}
 
 	line := strings.Join(parts, " ")
-	compactHelp := " arrows/tab tabs  j/k scroll  ? help  t git-status  r refresh  q quit"
-	if active == TabGraph {
-		compactHelp = " f/b page  d/u half  j/k line  a --all  ? help  q quit"
-		if opts.GraphAll {
-			compactHelp = " f/b page  d/u half  j/k line  a normal  ? help  q quit"
-		}
-	} else if active == TabDiff {
-		compactHelp = " y/i/a copy  s staged/worktree  f/b d/u j/k  ? help  q quit"
-	}
-	if opts.Notice != "" {
-		return tabBarNotice(active, tabs, line, opts)
-	}
-	if visibleLen(line)+visibleLen(compactHelp) <= opts.Width {
-		return line + color(opts, compactHelp, dim)
-	}
 	if visibleLen(line) <= opts.Width {
 		return line
 	}
@@ -258,51 +299,135 @@ func tabBar(active Tab, opts Options) string {
 	return compactTabBar(active, tabs, opts)
 }
 
-func tabBarNotice(active Tab, tabs []string, fullLine string, opts Options) string {
-	notice := " " + opts.Notice
-	if visibleLen(fullLine)+visibleLen(notice) <= opts.Width {
-		return fullLine + color(opts, notice, yellow)
-	}
-
-	label := fmt.Sprintf("[%d:%s]", int(active)+1, tabs[int(active)])
-	if visibleLen(label)+visibleLen(notice) <= opts.Width {
-		return color(opts, label, cyanBold) + color(opts, notice, yellow)
-	}
-	return color(opts, truncate(opts.Notice, opts.Width), yellow)
-}
-
 func compactTabBar(active Tab, tabs []string, opts Options) string {
-	controls := " tab arrows ? t q"
-	if active == TabGraph {
-		controls = " f/b d/u j/k ? a q"
-	} else if active == TabDiff {
-		controls = " y/i/a s f/b d/u j/k ? q"
-	}
 	prefix := fmt.Sprintf("[%d/%d ", int(active)+1, len(tabs))
 	suffix := "]"
-	nameWidth := opts.Width - visibleLen(prefix) - visibleLen(suffix) - len(controls)
+	nameWidth := opts.Width - visibleLen(prefix) - visibleLen(suffix)
 	if nameWidth < 1 {
-		return truncate(fmt.Sprintf("[%d/%d] ? q", int(active)+1, len(tabs)), opts.Width)
+		return truncate(fmt.Sprintf("[%d/%d]", int(active)+1, len(tabs)), opts.Width)
 	}
 	name := truncate(tabs[int(active)], nameWidth)
-	return color(opts, prefix+name+suffix, cyanBold) + color(opts, controls, dim)
+	return color(opts, prefix+name+suffix, cyanBold)
 }
 
 func helpTabBar(opts Options) string {
 	line := "1:overview 2:graph 3:files 4:diff 5:branches 6:stash 7:refs 8:remote [? help]"
 	if visibleLen(line) <= opts.Width {
-		controls := " tab back  q quit"
-		if visibleLen(line)+len(controls) <= opts.Width {
-			return line + color(opts, controls, dim)
-		}
 		return line
 	}
-	return truncate("[? help] tab back  q quit", opts.Width)
+	return truncate("[? help]", opts.Width)
 }
 
 func nativeStatusBar(opts Options) string {
-	line := "[git status] t back  r refresh  q quit"
+	line := "[git status]"
 	return truncate(line, opts.Width)
+}
+
+func footerLines(active Tab, opts Options) []string {
+	lines := wrapFooterItems("[keys]", tabKeyItems(active, opts), opts.Width)
+	for i, line := range lines {
+		lines[i] = color(opts, line, dim)
+	}
+	if opts.Notice == "" {
+		return lines
+	}
+
+	notice := wrapFooterText("[notice] "+opts.Notice, opts.Width)
+	out := make([]string, 0, len(notice)+len(lines))
+	for _, line := range notice {
+		out = append(out, color(opts, line, yellow))
+	}
+	return append(out, lines...)
+}
+
+func tabKeyItems(active Tab, opts Options) []string {
+	compact := opts.Width < 100
+	switch active {
+	case TabOverview:
+		if compact {
+			return []string{"left/right:tabs", "1-8", "t:native", "?", "r", "q"}
+		}
+		return []string{"left/right:tabs", "1-8:jump", "t:native", "?:help", "r:refresh", "q:quit"}
+	case TabGraph:
+		mode := "a --all"
+		if opts.GraphAll {
+			mode = "a normal"
+		}
+		if compact {
+			return []string{strings.ReplaceAll(mode, " ", ":"), "j/k", "d/u", "f/b", "left/right:tabs", "t:native", "?", "r", "q"}
+		}
+		return []string{strings.ReplaceAll(mode, " ", ":"), "j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "t:native", "?:help", "r:refresh", "q:quit"}
+	case TabDiff:
+		if compact {
+			return []string{"y:wt", "i:stg", "a:all", "s:toggle", "j/k", "d/u", "f/b", "left/right:tabs", "?", "r", "q"}
+		}
+		return []string{"y:copy-worktree", "i:copy-staged", "a:copy-all", "s:toggle", "j/k:line", "d/u:half", "f/b:page", "left/right:tabs", "?:help", "r:refresh", "q:quit"}
+	case TabHelp:
+		if compact {
+			return []string{"j/k", "d/u", "f/b", "left/right", "1-8", "q"}
+		}
+		return []string{"j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "1-8:jump", "q:quit"}
+	default:
+		if compact {
+			return []string{"j/k", "d/u", "f/b", "left/right:tabs", "t:native", "?", "r", "q"}
+		}
+		return []string{"j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "t:native", "?:help", "r:refresh", "q:quit"}
+	}
+}
+
+func nativeStatusFooterLines(opts Options) []string {
+	lines := wrapFooterItems("[keys]", []string{"t:back", "r:refresh", "q:quit"}, opts.Width)
+	for i, line := range lines {
+		lines[i] = color(opts, line, dim)
+	}
+	return lines
+}
+
+func wrapFooterItems(label string, items []string, width int) []string {
+	if len(items) == 0 {
+		return []string{truncate(label, width)}
+	}
+	prefix := label + " "
+	indent := strings.Repeat(" ", visibleLen(prefix))
+	var lines []string
+	current := prefix
+	for _, item := range items {
+		part := item
+		if current != prefix && current != indent {
+			part = ", " + item
+		}
+		if visibleLen(current)+visibleLen(part) <= width {
+			current += part
+			continue
+		}
+		lines = append(lines, current)
+		current = indent + item
+	}
+	lines = append(lines, current)
+	return lines
+}
+
+func wrapFooterText(text string, width int) []string {
+	if visibleLen(text) <= width {
+		return []string{text}
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return nil
+	}
+	var lines []string
+	current := words[0]
+	for _, word := range words[1:] {
+		part := " " + word
+		if visibleLen(current)+visibleLen(part) <= width {
+			current += part
+			continue
+		}
+		lines = append(lines, current)
+		current = word
+	}
+	lines = append(lines, current)
+	return lines
 }
 
 func nativeStatusLines(status string) []string {
