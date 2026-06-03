@@ -212,6 +212,9 @@ func TestCollectDiffIncludesStagedAndWorktreeDiffs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("three\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "new.txt"), []byte("fresh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
 	if err != nil {
@@ -224,9 +227,56 @@ func TestCollectDiffIncludesStagedAndWorktreeDiffs(t *testing.T) {
 		}
 	}
 	headDiff := strings.Join(state.HeadDiff, "\n")
-	for _, want := range []string{"-one", "+three"} {
+	for _, want := range []string{"-one", "+three", "new file mode", "+++ b/new.txt", "+fresh"} {
 		if !strings.Contains(headDiff, want) {
 			t.Fatalf("head diff missing %q:\n%s", want, headDiff)
+		}
+	}
+}
+
+func TestCollectHeadDiffIncludesUntrackedOnlyFiles(t *testing.T) {
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "tracked.txt")
+	runGit(t, root, "commit", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	headDiff := strings.Join(state.HeadDiff, "\n")
+	for _, want := range []string{"diff --git a/untracked.txt b/untracked.txt", "new file mode", "+++ b/untracked.txt", "+new"} {
+		if !strings.Contains(headDiff, want) {
+			t.Fatalf("head diff missing untracked %q:\n%s", want, headDiff)
+		}
+	}
+}
+
+func TestCollectHeadDiffIncludesInitialStagedAndUntrackedFiles(t *testing.T) {
+	root := initTestRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "staged.txt"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "staged.txt")
+	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte("untracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	headDiff := strings.Join(state.HeadDiff, "\n")
+	for _, want := range []string{"diff --git a/staged.txt b/staged.txt", "+++ b/staged.txt", "+staged", "diff --git a/untracked.txt b/untracked.txt", "+++ b/untracked.txt", "+untracked"} {
+		if !strings.Contains(headDiff, want) {
+			t.Fatalf("initial head diff missing %q:\n%s", want, headDiff)
 		}
 	}
 }

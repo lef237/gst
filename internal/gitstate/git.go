@@ -237,13 +237,38 @@ func collectDiffs(ctx context.Context, root string) (string, string, string, err
 		return "", "", "", err
 	}
 	if !hasHead {
-		return cached, worktree, "", nil
+		untracked, err := collectUntrackedDiff(ctx, root)
+		if err != nil {
+			return "", "", "", err
+		}
+		return cached, worktree, joinRawDiffs(cached, worktree, untracked), nil
 	}
-	head, err := git(ctx, root, "diff", "HEAD", "--no-ext-diff", "--unified=3")
+	trackedHead, err := git(ctx, root, "diff", "HEAD", "--binary", "--no-ext-diff", "--unified=3")
 	if err != nil {
 		return "", "", "", err
 	}
-	return cached, worktree, head, nil
+	untracked, err := collectUntrackedDiff(ctx, root)
+	if err != nil {
+		return "", "", "", err
+	}
+	return cached, worktree, joinRawDiffs(trackedHead, untracked), nil
+}
+
+func collectUntrackedDiff(ctx context.Context, root string) (string, error) {
+	out, err := git(ctx, root, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return "", err
+	}
+
+	var diffs []string
+	for _, path := range nulSeparated(out) {
+		diff, err := gitWithAllowedExitCodes(ctx, root, []int{1}, "diff", "--binary", "--no-ext-diff", "--unified=3", "--no-index", "--", "/dev/null", path)
+		if err != nil {
+			return "", err
+		}
+		diffs = append(diffs, diff)
+	}
+	return joinRawDiffs(diffs...), nil
 }
 
 func NativeStatus(ctx context.Context, dir string, color bool) (string, error) {
@@ -564,19 +589,34 @@ func gitPath(ctx context.Context, root, name string) (string, error) {
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
+	return gitWithAllowedExitCodes(ctx, dir, nil, args...)
+}
+
+func gitWithAllowedExitCodes(ctx context.Context, dir string, allowed []int, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		} else {
-			msg = err.Error() + ": " + msg
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			for _, code := range allowed {
+				if exitErr.ExitCode() == code {
+					return string(out), nil
+				}
+			}
 		}
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
+		return "", gitCommandError(args, out, err)
 	}
 	return string(out), nil
+}
+
+func gitCommandError(args []string, out []byte, err error) error {
+	msg := strings.TrimSpace(string(out))
+	if msg == "" {
+		msg = err.Error()
+	} else {
+		msg = err.Error() + ": " + msg
+	}
+	return fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
 }
 
 func nonEmptyLines(out string) []string {
@@ -589,11 +629,37 @@ func nonEmptyLines(out string) []string {
 	return lines
 }
 
+func nulSeparated(out string) []string {
+	if out == "" {
+		return nil
+	}
+	var parts []string
+	for _, part := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
 func diffLines(out string) []string {
 	if strings.TrimSpace(out) == "" {
 		return nil
 	}
 	return strings.Split(strings.TrimRight(out, "\n"), "\n")
+}
+
+func joinRawDiffs(diffs ...string) string {
+	var chunks []string
+	for _, diff := range diffs {
+		if strings.TrimSpace(diff) != "" {
+			chunks = append(chunks, strings.TrimRight(diff, "\n"))
+		}
+	}
+	if len(chunks) == 0 {
+		return ""
+	}
+	return strings.Join(chunks, "\n") + "\n"
 }
 
 func combineDiffs(staged, worktree []string) []string {
