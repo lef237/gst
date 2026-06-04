@@ -44,17 +44,31 @@ gst --once
 gst --no-color
 ```
 
-By default, `gst` opens the interactive TUI. Use `tab` or the left/right arrow
-keys to move between views, click a tab label, `1`-`8` to jump directly, `?`
-for help, `t` to toggle native `git status`, `a` on the graph view to toggle
-the detailed `--all` graph, `s` on the diff view to toggle worktree/staged
-diff, and copy diffs from the diff view with `y` for worktree, `i` for
-staged/index, or `a` for a full text patch from `HEAD` to the worktree,
-including untracked files; binary file contents are omitted. Less-like keys
-scroll graph, diff, and long list views: `j`/`k` for one line, `d`/`u` for half a
-page, and `f`/`b` for one page. Use `r` to refresh, and `q` to quit. The
-current tab's available keys are always shown in the footer. The
-available views are:
+By default, `gst` opens the interactive TUI.
+
+Interactive controls:
+
+- Move between views with `tab`, the left/right arrow keys, or by clicking a tab
+  label.
+- Jump directly to a view with `1`-`8`.
+- Show help with `?`.
+- Toggle display modes:
+  - `t`: native `git status`
+  - `a` on the graph view: detailed `--all` graph
+  - `s` on the diff view: worktree/staged diff
+- Copy diffs from the diff view:
+  - `y`: worktree diff
+  - `i`: staged/index diff
+  - `a`: full text patch from `HEAD` to the worktree, including untracked files
+    (binary file contents are omitted)
+- Scroll graph, diff, and long list views with less-like keys:
+  - `j`/`k`: one line
+  - `d`/`u`: half a page
+  - `f`/`b`: one page
+- Refresh with `r`; quit with `q`.
+
+The current tab's available keys are always shown in the footer. The available
+views are:
 
 - `overview`
 - `graph`
