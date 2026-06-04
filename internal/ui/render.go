@@ -299,6 +299,74 @@ func tabBar(active Tab, opts Options) string {
 	return compactTabBar(active, tabs, opts)
 }
 
+func TabAtColumn(active Tab, opts Options, col int) (Tab, bool) {
+	opts = normalizeOptions(opts)
+	if col < 1 {
+		return TabOverview, false
+	}
+	if active == TabHelp {
+		return helpTabAtColumn(opts, col)
+	}
+
+	tabs := Tabs()
+	spans, width := tabSpans(active, tabs)
+	if width > opts.Width {
+		return TabOverview, false
+	}
+	for _, span := range spans {
+		if col >= span.start && col <= span.end {
+			return span.tab, true
+		}
+	}
+	return TabOverview, false
+}
+
+type tabSpan struct {
+	tab        Tab
+	start, end int
+}
+
+func tabSpans(active Tab, tabs []string) ([]tabSpan, int) {
+	spans := make([]tabSpan, 0, len(tabs))
+	col := 1
+	for i, name := range tabs {
+		label := fmt.Sprintf("%d:%s", i+1, name)
+		if Tab(i) == active {
+			label = "[" + label + "]"
+		}
+		width := visibleLen(label)
+		spans = append(spans, tabSpan{tab: Tab(i), start: col, end: col + width - 1})
+		col += width + 1
+	}
+	return spans, col - 2
+}
+
+func helpTabAtColumn(opts Options, col int) (Tab, bool) {
+	tabs := Tabs()
+	spans, width := helpTabSpans(tabs)
+	if width > opts.Width {
+		return TabOverview, false
+	}
+	for _, span := range spans {
+		if col >= span.start && col <= span.end {
+			return span.tab, true
+		}
+	}
+	return TabOverview, false
+}
+
+func helpTabSpans(tabs []string) ([]tabSpan, int) {
+	spans := make([]tabSpan, 0, len(tabs))
+	col := 1
+	for i, name := range tabs {
+		label := fmt.Sprintf("%d:%s", i+1, name)
+		width := visibleLen(label)
+		spans = append(spans, tabSpan{tab: Tab(i), start: col, end: col + width - 1})
+		col += width + 1
+	}
+	return spans, visibleLen(helpTabBar(Options{Width: 1 << 30}))
+}
+
 func compactTabBar(active Tab, tabs []string, opts Options) string {
 	prefix := fmt.Sprintf("[%d/%d ", int(active)+1, len(tabs))
 	suffix := "]"
@@ -946,6 +1014,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"tab       move to the next view",
 		"right     move to the next view",
 		"left      move to the previous view",
+		"mouse     click a tab label to switch views",
 		"q         quit",
 		"j/k       scroll graph and diff by one line",
 		"d/u       scroll graph and diff by half a page",

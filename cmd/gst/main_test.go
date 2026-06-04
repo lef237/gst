@@ -126,6 +126,8 @@ func TestParseKeyDecodesArrowKeys(t *testing.T) {
 		{input: "\x1b[6~", want: "pagedown"},
 		{input: "\x1bOC", want: "right"},
 		{input: "\x1bOD", want: "left"},
+		{input: "\x1b[<0;39;2M", want: mouseKey(2, 39)},
+		{input: "\x1b[M" + string([]byte{32, 32 + 39, 32 + 2}), want: mouseKey(2, 39)},
 		{input: "q", want: "q"},
 	}
 
@@ -142,6 +144,53 @@ func TestParseKeyDecodesArrowKeys(t *testing.T) {
 		if got != tt.want {
 			t.Fatalf("parseKey(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestParseKeyIgnoresNonClickMouseSequences(t *testing.T) {
+	tests := []string{
+		"\x1b[<0;39;2m",
+		"\x1b[<64;39;2M",
+		"\x1b[<32;39;2M",
+	}
+
+	for _, input := range tests {
+		reader := bufio.NewReader(strings.NewReader(input + "q"))
+		first, err := reader.ReadByte()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := parseKey(reader, first)
+		if err != nil {
+			t.Fatalf("parseKey(%q): %v", input, err)
+		}
+		if got != "" {
+			t.Fatalf("parseKey(%q) = %q, want ignored", input, got)
+		}
+		next, err := reader.ReadByte()
+		if err != nil {
+			t.Fatalf("ignored sequence should be fully consumed: %v", err)
+		}
+		if next != 'q' {
+			t.Fatalf("ignored sequence left extra byte %q before q", next)
+		}
+	}
+}
+
+func TestTabClickSelectsRenderedTab(t *testing.T) {
+	tab, ok := tabClick(mouseKey(2, 39), ui.TabOverview, false, true, 120)
+	if !ok || tab != ui.TabBranches {
+		t.Fatalf("tab click = %v, %v; want branches", tab, ok)
+	}
+
+	if tab, ok := tabClick(mouseKey(3, 39), ui.TabOverview, false, true, 120); ok {
+		t.Fatalf("click outside tab row should be ignored, got %v", tab)
+	}
+	if tab, ok := tabClick(mouseKey(2, 39), ui.TabOverview, true, true, 120); ok {
+		t.Fatalf("native status click should be ignored, got %v", tab)
+	}
+	if tab, ok := tabClick(mouseKey(2, 39), ui.TabOverview, false, false, 120); ok {
+		t.Fatalf("loading click should be ignored, got %v", tab)
 	}
 }
 

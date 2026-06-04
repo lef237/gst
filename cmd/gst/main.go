@@ -193,6 +193,12 @@ func run(args []string) int {
 				notice = ""
 				forceDraw = true
 			}
+			if next, ok := tabClick(key, active, nativeStatus, stateReady, width); ok {
+				active = next
+				nativeStatus = false
+				forceDraw = true
+				continue
+			}
 			switch key {
 			case "q", "Q", "\x03":
 				return 0
@@ -410,6 +416,17 @@ func canScroll(active ui.Tab, native bool) bool {
 	return active != ui.TabOverview
 }
 
+func tabClick(key string, active ui.Tab, nativeStatus, stateReady bool, width int) (ui.Tab, bool) {
+	if nativeStatus || !stateReady {
+		return ui.TabOverview, false
+	}
+	row, col, ok := parseMouseKey(key)
+	if !ok || row != 2 {
+		return ui.TabOverview, false
+	}
+	return ui.TabAtColumn(active, ui.Options{Width: width, Interactive: true}, col)
+}
+
 type diffCopyTarget int
 
 const (
@@ -530,11 +547,11 @@ func enableCBreakMode() (func(), error) {
 }
 
 func enterTUI() {
-	fmt.Print("\x1b[?1049h\x1b[?25l\x1b[H")
+	fmt.Print("\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[H")
 }
 
 func leaveTUI() {
-	fmt.Print("\x1b[?25h\x1b[?1049l")
+	fmt.Print("\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l")
 }
 
 type frameDrawer struct {
@@ -742,42 +759,154 @@ func parseKey(reader *bufio.Reader, b byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if next != '[' && next != 'O' {
-		return "", nil
-	}
-
-	final, err := reader.ReadByte()
-	if err != nil {
-		return "", err
-	}
-	switch final {
-	case 'A':
-		return "up", nil
-	case 'B':
-		return "down", nil
-	case 'C':
-		return "right", nil
-	case 'D':
-		return "left", nil
-	case 'F':
-		return "end", nil
-	case 'H':
-		return "home", nil
-	case '5', '6':
-		tilde, err := reader.ReadByte()
+	switch next {
+	case '[':
+		return parseCSIKey(reader)
+	case 'O':
+		final, err := reader.ReadByte()
 		if err != nil {
 			return "", err
 		}
-		if tilde != '~' {
-			return "", nil
+		return keyFromSS3(final), nil
+	default:
+		return "", nil
+	}
+}
+
+func parseCSIKey(reader *bufio.Reader) (string, error) {
+	var seq strings.Builder
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return "", err
 		}
-		if final == '5' {
-			return "pageup", nil
+		seq.WriteByte(b)
+		if b >= 0x40 && b <= 0x7e {
+			break
 		}
+	}
+
+	s := seq.String()
+	if s == "M" {
+		return parseLegacyMouse(reader)
+	}
+	if strings.HasPrefix(s, "<") {
+		return parseSGRMouse(s), nil
+	}
+
+	switch s {
+	case "A":
+		return "up", nil
+	case "B":
+		return "down", nil
+	case "C":
+		return "right", nil
+	case "D":
+		return "left", nil
+	case "F":
+		return "end", nil
+	case "H":
+		return "home", nil
+	case "5~":
+		return "pageup", nil
+	case "6~":
 		return "pagedown", nil
 	default:
 		return "", nil
 	}
+}
+
+func keyFromSS3(final byte) string {
+	switch final {
+	case 'A':
+		return "up"
+	case 'B':
+		return "down"
+	case 'C':
+		return "right"
+	case 'D':
+		return "left"
+	case 'F':
+		return "end"
+	case 'H':
+		return "home"
+	default:
+		return ""
+	}
+}
+
+const mouseKeyPrefix = "mouse:"
+
+func mouseKey(row, col int) string {
+	return fmt.Sprintf("%s%d:%d", mouseKeyPrefix, row, col)
+}
+
+func parseMouseKey(key string) (int, int, bool) {
+	if !strings.HasPrefix(key, mouseKeyPrefix) {
+		return 0, 0, false
+	}
+	coords := strings.TrimPrefix(key, mouseKeyPrefix)
+	rowText, colText, ok := strings.Cut(coords, ":")
+	if !ok {
+		return 0, 0, false
+	}
+	row, rowErr := strconv.Atoi(rowText)
+	col, colErr := strconv.Atoi(colText)
+	if rowErr != nil || colErr != nil {
+		return 0, 0, false
+	}
+	return row, col, true
+}
+
+func parseSGRMouse(seq string) string {
+	if len(seq) < 2 {
+		return ""
+	}
+	final := seq[len(seq)-1]
+	if final != 'M' {
+		return ""
+	}
+	body := seq[1 : len(seq)-1]
+	parts := strings.Split(body, ";")
+	if len(parts) != 3 {
+		return ""
+	}
+	button, buttonErr := strconv.Atoi(parts[0])
+	col, colErr := strconv.Atoi(parts[1])
+	row, rowErr := strconv.Atoi(parts[2])
+	if buttonErr != nil || colErr != nil || rowErr != nil {
+		return ""
+	}
+	return mousePressKey(button, row, col)
+}
+
+func parseLegacyMouse(reader *bufio.Reader) (string, error) {
+	buttonByte, err := reader.ReadByte()
+	if err != nil {
+		return "", err
+	}
+	colByte, err := reader.ReadByte()
+	if err != nil {
+		return "", err
+	}
+	rowByte, err := reader.ReadByte()
+	if err != nil {
+		return "", err
+	}
+	button := int(buttonByte) - 32
+	col := int(colByte) - 32
+	row := int(rowByte) - 32
+	return mousePressKey(button, row, col), nil
+}
+
+func mousePressKey(button, row, col int) string {
+	if row <= 0 || col <= 0 {
+		return ""
+	}
+	if button&64 != 0 || button&32 != 0 || button&3 != 0 {
+		return ""
+	}
+	return mouseKey(row, col)
 }
 
 func enqueueLatest(ctx context.Context, keys chan string, key string) bool {

@@ -63,6 +63,29 @@ func TestRenderGraphAllMode(t *testing.T) {
 	}
 }
 
+func TestTabAtColumnMatchesRenderedTabBar(t *testing.T) {
+	tab, ok := TabAtColumn(TabOverview, Options{Width: 120}, 39)
+	if !ok || tab != TabBranches {
+		t.Fatalf("click on branches column = %v, %v; want branches", tab, ok)
+	}
+
+	tab, ok = TabAtColumn(TabBranches, Options{Width: 120}, 35)
+	if !ok || tab != TabBranches {
+		t.Fatalf("click on active branches bracket = %v, %v; want branches", tab, ok)
+	}
+
+	tab, ok = TabAtColumn(TabHelp, Options{Width: 120}, 39)
+	if !ok || tab != TabBranches {
+		t.Fatalf("click on help tab bar branches column = %v, %v; want branches", tab, ok)
+	}
+}
+
+func TestTabAtColumnIgnoresCompactTabBar(t *testing.T) {
+	if tab, ok := TabAtColumn(TabOverview, Options{Width: 35}, 10); ok {
+		t.Fatalf("compact tab bar should not map clicks, got %v", tab)
+	}
+}
+
 func TestRenderDiffTab(t *testing.T) {
 	state := gitstate.State{
 		RepoRoot: "/repo",
