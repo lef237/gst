@@ -689,14 +689,15 @@ func diffLineAt(diff []string, mode, next string, width, index int, opts Options
 		case 0:
 			return color(opts, fmt.Sprintf("no %s diff", mode), green)
 		case 1:
-			return color(opts, fmt.Sprintf("press s to show %s diff", next), dim)
+			return truncate(diffTogglePrompt(next, opts), width)
 		default:
 			return ""
 		}
 	}
 	switch index {
 	case 0:
-		return color(opts, fmt.Sprintf("mode: %s diff, press s to show %s diff", mode, next), cyanBold)
+		line := color(opts, fmt.Sprintf("mode: %s diff", mode), cyanBold) + "  " + diffTogglePrompt(next, opts)
+		return truncate(line, width)
 	case 1:
 		return color(opts, "copy: y worktree, i staged, a full text patch; binary omitted", dim)
 	}
@@ -705,6 +706,10 @@ func diffLineAt(diff []string, mode, next string, width, index int, opts Options
 		return ""
 	}
 	return colorDiffLine(truncate(expandTabs(diff[diffIndex], 8), width), opts)
+}
+
+func diffTogglePrompt(next string, opts Options) string {
+	return color(opts, fmt.Sprintf("press s to show %s diff", next), yellowBold)
 }
 
 func diffScrollPanel(title string, state gitstate.State, width, maxHeight int, opts Options) string {
@@ -1188,15 +1193,16 @@ func colorDiffLine(line string, opts Options) string {
 type style string
 
 const (
-	reset     style = "\x1b[0m"
-	dim       style = "\x1b[2m"
-	red       style = "\x1b[31m"
-	green     style = "\x1b[32m"
-	yellow    style = "\x1b[33m"
-	magenta   style = "\x1b[35m"
-	cyan      style = "\x1b[36m"
-	cyanBold  style = "\x1b[1;36m"
-	whiteBold style = "\x1b[1;37m"
+	reset      style = "\x1b[0m"
+	dim        style = "\x1b[2m"
+	red        style = "\x1b[31m"
+	green      style = "\x1b[32m"
+	yellow     style = "\x1b[33m"
+	yellowBold style = "\x1b[1;33m"
+	magenta    style = "\x1b[35m"
+	cyan       style = "\x1b[36m"
+	cyanBold   style = "\x1b[1;36m"
+	whiteBold  style = "\x1b[1;37m"
 )
 
 func color(opts Options, s string, st style) string {

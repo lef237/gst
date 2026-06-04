@@ -93,6 +93,29 @@ func TestRenderDiffTab(t *testing.T) {
 	}
 }
 
+func TestRenderDiffTogglePromptIsHighlighted(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/repo",
+		Branch:   "main",
+		Head:     "abcdef1",
+		WorktreeDiff: []string{
+			"diff --git a/file.txt b/file.txt",
+			"+newer",
+		},
+	}
+
+	out := RenderTab(state, TabDiff, Options{Width: 90, Height: 10, Interactive: true, Color: true})
+	want := string(yellowBold) + "press s to show staged diff" + string(reset)
+	if !strings.Contains(out, want) {
+		t.Fatalf("diff toggle prompt should be highlighted with yellow bold:\n%q", out)
+	}
+
+	empty := RenderTab(gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}, TabDiff, Options{Width: 90, Height: 10, Interactive: true, Color: true})
+	if !strings.Contains(empty, want) {
+		t.Fatalf("empty diff toggle prompt should be highlighted with yellow bold:\n%q", empty)
+	}
+}
+
 func TestRenderNoticeInFooter(t *testing.T) {
 	state := gitstate.State{RepoRoot: "/repo", Branch: "main", Head: "abcdef1"}
 	out := RenderTab(state, TabDiff, Options{Width: 80, Height: 10, Interactive: true, Notice: "copied worktree diff"})
