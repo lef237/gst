@@ -5,6 +5,10 @@ shape of a repository before they run Git commands.
 
 ![Image](https://github.com/user-attachments/assets/09fd03cf-2781-4d9f-b73d-f057e9e1ac90)
 
+**Demo: https://youtu.be/EMO3DaNkqT0**
+
+## Motivation
+
 Git beginners often struggle because the current state is split across several
 places:
 
