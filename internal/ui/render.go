@@ -25,9 +25,9 @@ type Tab int
 
 const (
 	TabOverview Tab = iota
+	TabDiff
 	TabGraph
 	TabFiles
-	TabDiff
 	TabBranches
 	TabStash
 	TabRefs
@@ -36,7 +36,7 @@ const (
 )
 
 func Tabs() []string {
-	return []string{"overview", "graph", "files", "diff", "branches", "stash", "refs", "remote"}
+	return []string{"overview", "diff", "graph", "files", "branches", "stash", "refs", "remote"}
 }
 
 func Render(state gitstate.State, opts Options) string {
@@ -379,7 +379,7 @@ func compactTabBar(active Tab, tabs []string, opts Options) string {
 }
 
 func helpTabBar(opts Options) string {
-	line := "1:overview 2:graph 3:files 4:diff 5:branches 6:stash 7:refs 8:remote [? help]"
+	line := "1:overview 2:diff 3:graph 4:files 5:branches 6:stash 7:refs 8:remote [? help]"
 	if visibleLen(line) <= opts.Width {
 		return line
 	}
@@ -1032,9 +1032,9 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"",
 		color(opts, "views", cyanBold),
 		"overview  sync, workspace, changed files, and recent graph",
+		"diff      current staged and worktree patch",
 		"graph     normal graph; press a for detailed --all graph",
 		"files     index and worktree changes",
-		"diff      current staged and worktree patch",
 		"branches  current branch, upstream, and branch relationships",
 		"stash     temporary saved work outside the current branch",
 		"refs      local/remote branches and tags",

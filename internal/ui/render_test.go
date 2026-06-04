@@ -27,7 +27,7 @@ func TestRenderTabFitsHeight(t *testing.T) {
 	if len(lines) > 8 {
 		t.Fatalf("rendered %d lines, want at most 8:\n%s", len(lines), out)
 	}
-	if !strings.Contains(out, "[2:graph]") {
+	if !strings.Contains(out, "[3:graph]") {
 		t.Fatalf("active tab was not rendered:\n%s", out)
 	}
 }
@@ -106,7 +106,7 @@ func TestRenderDiffTab(t *testing.T) {
 	}
 
 	out := RenderTab(state, TabDiff, Options{Width: 90, Height: 12, Interactive: true})
-	if !strings.Contains(out, "[4:diff]") || !strings.Contains(out, "mode: worktree diff") || !strings.Contains(out, "+newer") || !strings.Contains(out, "copy: y worktree") {
+	if !strings.Contains(out, "[2:diff]") || !strings.Contains(out, "mode: worktree diff") || !strings.Contains(out, "+newer") || !strings.Contains(out, "copy: y worktree") {
 		t.Fatalf("diff tab did not render worktree patch:\n%s", out)
 	}
 

@@ -195,8 +195,8 @@ func TestTabClickSelectsRenderedTab(t *testing.T) {
 }
 
 func TestTabNavigationWraps(t *testing.T) {
-	if got := nextTab(ui.TabOverview); got != ui.TabGraph {
-		t.Fatalf("next overview = %v, want graph", got)
+	if got := nextTab(ui.TabOverview); got != ui.TabDiff {
+		t.Fatalf("next overview = %v, want diff", got)
 	}
 	if got := previousTab(ui.TabOverview); got != ui.TabRemote {
 		t.Fatalf("previous overview = %v, want remote", got)
