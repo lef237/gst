@@ -21,6 +21,12 @@ checkout, commit, merge, rebase, or mutate the repository.
 go install github.com/lef237/gst/cmd/gst@latest
 ```
 
+Or with Homebrew:
+
+```sh
+brew install lef237/tap/gst
+```
+
 For local development:
 
 ```sh

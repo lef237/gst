@@ -116,6 +116,42 @@ After the release is complete, the generated directory can be discarded:
 trash tmp/gst-release
 ```
 
+## Homebrew Tap
+
+`gst` is also published through the personal tap at
+[lef237/homebrew-tap](https://github.com/lef237/homebrew-tap) so users can
+install it with:
+
+```sh
+brew install lef237/tap/gst
+```
+
+The formula at `Formula/gst.rb` builds from the release source tarball, so it
+must be updated after each new tag. Take the version's source tarball and
+compute its checksum:
+
+```sh
+curl -sL https://github.com/lef237/gst/archive/refs/tags/vX.Y.Z.tar.gz \
+  | shasum -a 256
+```
+
+Update `url` and `sha256` in `Formula/gst.rb` to point at the new tag. The
+formula injects the version through `ldflags`, so no other edits are needed:
+
+```ruby
+url "https://github.com/lef237/gst/archive/refs/tags/vX.Y.Z.tar.gz"
+sha256 "<checksum from the command above>"
+```
+
+Verify the formula builds and reports the right version, then commit and push
+the tap:
+
+```sh
+brew install --build-from-source lef237/tap/gst
+gst --version   # expects: gst vX.Y.Z
+brew test lef237/tap/gst
+```
+
 ## Release Checklist
 
 - Working tree is clean.
@@ -125,3 +161,4 @@ trash tmp/gst-release
 - The release tag follows semver, such as `v0.1.0`.
 - The tag has been pushed to GitHub.
 - Optional GitHub Release assets and `checksums.txt` are attached.
+- The Homebrew formula at `lef237/homebrew-tap` points at the new tag.
