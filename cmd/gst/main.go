@@ -419,9 +419,6 @@ const (
 )
 
 func copyDiff(ctx context.Context, state gitstate.State, target diffCopyTarget) string {
-	if target == copyWorktreeDiff && len(state.StagedDiff) > 0 {
-		return "worktree diff is index-based; use a to copy a full patch"
-	}
 	label, text := diffClipboardPayload(state, target)
 	if text == "" {
 		return "nothing to copy: " + label + " is empty"
