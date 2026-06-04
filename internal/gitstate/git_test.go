@@ -131,6 +131,50 @@ func TestParseRefsKeepsLocalBranchNamedOrigin(t *testing.T) {
 	}
 }
 
+func TestParseTagsPeelsAnnotatedTags(t *testing.T) {
+	tags := parseTags("v1.0.0\t9999999\t1111111\ttag\t2 days ago\trelease v1\nv0.9.0\t2222222\t\tcommit\t3 days ago\tinitial\n")
+	if len(tags) != 2 {
+		t.Fatalf("tags mismatch: %#v", tags)
+	}
+	if tags[0].Name != "v1.0.0" || tags[0].Hash != "1111111" || !tags[0].Annotated || tags[0].Subject != "release v1" {
+		t.Fatalf("annotated tag parse failed: %#v", tags[0])
+	}
+	if tags[1].Name != "v0.9.0" || tags[1].Hash != "2222222" || tags[1].Annotated || tags[1].Subject != "initial" {
+		t.Fatalf("lightweight tag parse failed: %#v", tags[1])
+	}
+}
+
+func TestCollectIncludesTags(t *testing.T) {
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "file.txt")
+	runGit(t, root, "commit", "-qm", "initial")
+	runGit(t, root, "tag", "v0.1.0")
+	runGit(t, root, "tag", "-a", "v1.0.0", "-m", "release v1")
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]Tag{}
+	for _, tag := range state.Tags {
+		byName[tag.Name] = tag
+	}
+	if len(byName) != 2 {
+		t.Fatalf("tags mismatch: %#v", state.Tags)
+	}
+	if tag := byName["v0.1.0"]; tag.Name == "" || tag.Annotated || tag.Hash != state.Head {
+		t.Fatalf("lightweight tag mismatch: %#v, head %q", tag, state.Head)
+	}
+	if tag := byName["v1.0.0"]; tag.Name == "" || !tag.Annotated || tag.Hash != state.Head || tag.Subject != "release v1" {
+		t.Fatalf("annotated tag mismatch: %#v, head %q", tag, state.Head)
+	}
+}
+
 func TestDetectOperationMerge(t *testing.T) {
 	root := initTestRepo(t)
 	if err := os.WriteFile(filepath.Join(root, ".git", "MERGE_HEAD"), []byte("abc\n"), 0o644); err != nil {

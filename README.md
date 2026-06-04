@@ -77,7 +77,7 @@ available views are:
 - `diff`: the current worktree or staged patch, toggled with `s`
 - `branches`: current branch, upstream, and local/remote branch relationships
 - `stash`: temporary saved work outside the current branch
-- `refs`: local and remote branches with recent commit ages
+- `refs`: local/remote branches and tags with recent commit or tag ages
 - `repository notes`: remotes, stashes, and non-fatal collection warnings
 - `attention`: in-progress merge/rebase/cherry-pick/revert guidance when relevant
 

@@ -35,6 +35,7 @@ type State struct {
 	HeadDiff     []string
 	Graph        []string
 	Refs         []Ref
+	Tags         []Tag
 	Remotes      []Remote
 	Stashes      []Stash
 	Warnings     []string
@@ -61,6 +62,14 @@ type Ref struct {
 	Upstream string
 	Remote   bool
 	Current  bool
+}
+
+type Tag struct {
+	Name      string
+	Hash      string
+	Age       string
+	Subject   string
+	Annotated bool
 }
 
 type Remote struct {
@@ -149,6 +158,13 @@ func Collect(ctx context.Context, dir string, opts Options) (State, error) {
 	run(func() {
 		if out, err := git(ctx, root, "for-each-ref", "refs/heads", "refs/remotes", "--format=%(refname)%09%(refname:short)%09%(objectname:short)%09%(committerdate:relative)%09%(upstream:short)"); err == nil {
 			refsOut, refsOK = out, true
+		} else {
+			warn(err)
+		}
+	})
+	run(func() {
+		if out, err := git(ctx, root, "for-each-ref", "refs/tags", "--sort=-creatordate", "--format=%(refname:short)%09%(objectname:short)%09%(*objectname:short)%09%(objecttype)%09%(creatordate:relative)%09%(subject)"); err == nil {
+			state.Tags = parseTags(out)
 		} else {
 			warn(err)
 		}
@@ -484,6 +500,34 @@ func parseRefs(out, current string) []Ref {
 		return refs[i].Name < refs[j].Name
 	})
 	return refs
+}
+
+func parseTags(out string) []Tag {
+	var tags []Tag
+	for _, line := range nonEmptyLines(out) {
+		parts := strings.SplitN(line, "\t", 6)
+		for len(parts) < 6 {
+			parts = append(parts, "")
+		}
+		name := parts[0]
+		hash := parts[1]
+		peeledHash := parts[2]
+		objectType := parts[3]
+		age := parts[4]
+		subject := parts[5]
+		annotated := objectType == "tag"
+		if peeledHash != "" {
+			hash = peeledHash
+		}
+		tags = append(tags, Tag{
+			Name:      name,
+			Hash:      hash,
+			Age:       age,
+			Subject:   subject,
+			Annotated: annotated,
+		})
+	}
+	return tags
 }
 
 func parseRemotes(out string) []Remote {

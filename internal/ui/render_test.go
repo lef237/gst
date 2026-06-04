@@ -232,6 +232,26 @@ func TestRenderBranchAndStashTabs(t *testing.T) {
 	}
 }
 
+func TestRenderRefsTabIncludesTags(t *testing.T) {
+	state := gitstate.State{
+		RepoRoot: "/repo",
+		Branch:   "main",
+		Head:     "abcdef1",
+		Refs:     []gitstate.Ref{{Name: "main", Hash: "abcdef1", Age: "now", Current: true}},
+		Tags: []gitstate.Tag{
+			{Name: "v1.0.0", Hash: "abcdef1", Age: "2 days ago", Subject: "release v1", Annotated: true},
+			{Name: "v0.9.0", Hash: "1234567", Age: "3 days ago", Subject: "initial", Annotated: false},
+		},
+	}
+
+	out := RenderTab(state, TabRefs, Options{Width: 100, Height: 14, Interactive: true})
+	for _, want := range []string{"[7:refs]", "branches", "tags", "v1.0.0", "annotated", "release v1", "v0.9.0", "lightweight"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("refs tab missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderNarrowOverviewFitsWidth(t *testing.T) {
 	state := gitstate.State{
 		RepoRoot: "/very/long/repository/path/that/must/not/overflow",

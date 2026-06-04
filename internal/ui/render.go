@@ -817,12 +817,14 @@ func fileKindLabel(kind string, opts Options) string {
 }
 
 func refLines(state gitstate.State, width int, opts Options) []string {
-	if len(state.Refs) == 0 {
+	if len(state.Refs) == 0 && len(state.Tags) == 0 {
 		return []string{color(opts, "no refs", dim)}
 	}
-	limit := min(len(state.Refs), 14)
-	lines := make([]string, 0, limit+1)
-	for _, ref := range state.Refs[:limit] {
+	lines := make([]string, 0, len(state.Refs)+len(state.Tags)+3)
+	if len(state.Refs) > 0 && len(state.Tags) > 0 {
+		lines = append(lines, color(opts, "branches", cyanBold))
+	}
+	for _, ref := range state.Refs {
 		prefix := " "
 		if ref.Current {
 			prefix = color(opts, "*", green)
@@ -840,8 +842,24 @@ func refLines(state gitstate.State, width int, opts Options) []string {
 		line := fmt.Sprintf("%s %-6s %-18s %s %s", prefix, scope, name, ref.Hash, ref.Age)
 		lines = append(lines, truncate(line, width))
 	}
-	if len(state.Refs) > limit {
-		lines = append(lines, color(opts, fmt.Sprintf("... %d more", len(state.Refs)-limit), dim))
+
+	if len(state.Tags) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, color(opts, "tags", cyanBold))
+		for _, tag := range state.Tags {
+			kind := "lightweight"
+			if tag.Annotated {
+				kind = "annotated"
+			}
+			name := color(opts, tag.Name, yellow)
+			line := fmt.Sprintf("  %-6s %-18s %s %-12s %s", color(opts, "tag", yellow), name, tag.Hash, kind, tag.Age)
+			if tag.Subject != "" {
+				line += "  " + color(opts, tag.Subject, dim)
+			}
+			lines = append(lines, truncate(line, width))
+		}
 	}
 	return lines
 }
@@ -950,7 +968,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"diff      current staged and worktree patch",
 		"branches  current branch, upstream, and branch relationships",
 		"stash     temporary saved work outside the current branch",
-		"refs      local and remote refs",
+		"refs      local/remote branches and tags",
 		"remote    remotes, stashes, and collection warnings",
 		"",
 		color(opts, "mental model", cyanBold),
