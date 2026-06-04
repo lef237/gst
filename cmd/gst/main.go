@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,6 +95,8 @@ func run(args []string) int {
 	ticker := time.NewTicker(max(*interval, 500*time.Millisecond))
 	defer ticker.Stop()
 	keys := readKeys(ctx)
+	stateRefreshes := make(chan stateRefreshResult, 1)
+	nativeRefreshes := make(chan nativeRefreshResult, 1)
 	active := ui.TabOverview
 	nativeStatus := false
 	graphAll := false
@@ -103,7 +106,13 @@ func run(args []string) int {
 	stateReady := false
 	nativeOutput := ""
 	nativeReady := false
-	needsRefresh := true
+	stateRefreshPending := true
+	stateRefreshing := false
+	stateRefreshID := 0
+	nativeRefreshPending := false
+	nativeRefreshing := false
+	nativeRefreshID := 0
+	drawer := frameDrawer{}
 	lastFrame := ""
 	forceDraw := true
 	notice := ""
@@ -112,39 +121,36 @@ func run(args []string) int {
 		renderOpts := ui.Options{Color: color, Width: width, Height: height, Interactive: true, GraphAll: graphAll, DiffStaged: diffStaged, Scroll: scrolls[active], Notice: notice}
 		frame := ""
 		if nativeStatus {
-			if needsRefresh || !nativeReady {
-				refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				status, err := gitstate.NativeStatus(refreshCtx, ".", renderOpts.Color)
-				cancel()
-				if err != nil {
-					return failTUI(err)
-				}
-				nativeOutput = status
-				nativeReady = true
+			if (nativeRefreshPending || !nativeReady) && !nativeRefreshing {
+				nativeRefreshPending = false
+				nativeRefreshing = true
+				nativeRefreshID++
+				startNativeRefresh(ctx, nativeRefreshID, renderOpts.Color, nativeRefreshes)
 			}
-			frame = ui.RenderNativeStatus(nativeOutput, renderOpts)
+			if nativeReady {
+				frame = ui.RenderNativeStatus(nativeOutput, renderOpts)
+			} else {
+				frame = loadingFrame("loading git status...", width, height)
+			}
 		} else {
-			if needsRefresh || !stateReady {
-				refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				collectOpts := opts
-				collectOpts.GraphAll = graphAll
-				nextState, err := gitstate.Collect(refreshCtx, ".", collectOpts)
-				cancel()
-				if err != nil {
-					return failTUI(err)
+			if (stateRefreshPending || !stateReady) && !stateRefreshing {
+				stateRefreshPending = false
+				stateRefreshing = true
+				stateRefreshID++
+				startStateRefresh(ctx, stateRefreshID, opts, graphAll, stateRefreshes)
+			}
+			if stateReady {
+				if canScroll(active, nativeStatus) {
+					scrolls[active] = min(scrolls[active], ui.MaxScroll(state, active, renderOpts))
+					renderOpts.Scroll = scrolls[active]
 				}
-				state = nextState
-				stateReady = true
+				frame = ui.RenderTab(state, active, renderOpts)
+			} else {
+				frame = loadingFrame("loading repository state...", width, height)
 			}
-			if canScroll(active, nativeStatus) {
-				scrolls[active] = min(scrolls[active], ui.MaxScroll(state, active, renderOpts))
-				renderOpts.Scroll = scrolls[active]
-			}
-			frame = ui.RenderTab(state, active, renderOpts)
 		}
-		needsRefresh = false
 		if forceDraw || frame != lastFrame {
-			drawFrame(frame)
+			drawer.draw(frame)
 			lastFrame = frame
 			forceDraw = false
 		}
@@ -152,6 +158,33 @@ func run(args []string) int {
 		select {
 		case <-ctx.Done():
 			return 0
+		case result := <-stateRefreshes:
+			stateRefreshing = false
+			if result.id != stateRefreshID {
+				continue
+			}
+			if result.graphAll != graphAll {
+				stateRefreshPending = true
+				forceDraw = true
+				continue
+			}
+			if result.err != nil {
+				return failTUI(result.err)
+			}
+			state = result.state
+			stateReady = true
+			forceDraw = true
+		case result := <-nativeRefreshes:
+			nativeRefreshing = false
+			if result.id != nativeRefreshID {
+				continue
+			}
+			if result.err != nil {
+				return failTUI(result.err)
+			}
+			nativeOutput = result.output
+			nativeReady = true
+			forceDraw = true
 		case key, ok := <-keys:
 			if !ok {
 				return 0
@@ -218,7 +251,7 @@ func run(args []string) int {
 			case "t", "T":
 				nativeStatus = !nativeStatus
 				if nativeStatus && !nativeReady {
-					needsRefresh = true
+					nativeRefreshPending = true
 				}
 				forceDraw = true
 			case "a", "A":
@@ -226,7 +259,7 @@ func run(args []string) int {
 					graphAll = !graphAll
 					scrolls[ui.TabGraph] = 0
 					stateReady = false
-					needsRefresh = true
+					stateRefreshPending = true
 					forceDraw = true
 				} else if active == ui.TabDiff && !nativeStatus {
 					notice = copyDiff(ctx, state, copyAllDiffs)
@@ -256,13 +289,20 @@ func run(args []string) int {
 					forceDraw = true
 				}
 			case "r", "R":
-				needsRefresh = true
-				nativeReady = false
-				stateReady = false
+				if nativeStatus {
+					nativeReady = false
+					nativeRefreshPending = true
+				} else {
+					stateRefreshPending = true
+				}
 				forceDraw = true
 			}
 		case <-ticker.C:
-			needsRefresh = true
+			if nativeStatus {
+				nativeRefreshPending = true
+			} else {
+				stateRefreshPending = true
+			}
 		case <-resizes:
 			nextWidth, nextHeight := terminalSize()
 			if nextWidth != width || nextHeight != height {
@@ -281,6 +321,72 @@ func printOnce(ctx context.Context, opts gitstate.Options, render ui.Options) in
 	}
 	fmt.Print(ui.Render(state, render))
 	return 0
+}
+
+type stateRefreshResult struct {
+	id       int
+	graphAll bool
+	state    gitstate.State
+	err      error
+}
+
+type nativeRefreshResult struct {
+	id     int
+	output string
+	err    error
+}
+
+func startStateRefresh(ctx context.Context, id int, opts gitstate.Options, graphAll bool, results chan<- stateRefreshResult) {
+	go func() {
+		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		collectOpts := opts
+		collectOpts.GraphAll = graphAll
+		state, err := gitstate.Collect(refreshCtx, ".", collectOpts)
+		select {
+		case results <- stateRefreshResult{id: id, graphAll: graphAll, state: state, err: err}:
+		case <-ctx.Done():
+		}
+	}()
+}
+
+func startNativeRefresh(ctx context.Context, id int, color bool, results chan<- nativeRefreshResult) {
+	go func() {
+		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		output, err := gitstate.NativeStatus(refreshCtx, ".", color)
+		select {
+		case results <- nativeRefreshResult{id: id, output: output, err: err}:
+		case <-ctx.Done():
+		}
+	}()
+}
+
+func loadingFrame(message string, width, height int) string {
+	if width < 30 {
+		width = 30
+	}
+	if height < 8 {
+		height = 8
+	}
+	lines := make([]string, height)
+	lines[0] = fitPlain(" gst ", width)
+	if height > 2 {
+		lines[2] = fitPlain(message, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func fitPlain(s string, width int) string {
+	if len(s) <= width {
+		return s
+	}
+	if width <= 1 {
+		return ""
+	}
+	return s[:width-1] + "."
 }
 
 func nextTab(active ui.Tab) ui.Tab {
@@ -434,19 +540,167 @@ func leaveTUI() {
 	fmt.Print("\x1b[?25h\x1b[?1049l")
 }
 
-func drawFrame(frame string) {
-	var out strings.Builder
-	out.Grow(len(frame) + 16)
-	out.WriteString("\x1b[H")
-	for i, line := range strings.Split(frame, "\n") {
-		if i > 0 {
-			out.WriteString("\n")
-		}
-		out.WriteString("\x1b[2K")
-		out.WriteString(line)
+type frameDrawer struct {
+	lines []string
+}
+
+func (d *frameDrawer) draw(frame string) {
+	if out := d.render(frame); out != "" {
+		fmt.Print(out)
 	}
-	out.WriteString("\x1b[J")
-	fmt.Print(out.String())
+}
+
+func (d *frameDrawer) render(frame string) string {
+	next := strings.Split(frame, "\n")
+	var out strings.Builder
+	out.Grow(len(frame) + len(next)*10)
+	if len(d.lines) == 0 {
+		out.WriteString("\x1b[H")
+		for i, line := range next {
+			if i > 0 {
+				out.WriteString("\n")
+			}
+			out.WriteString("\x1b[2K")
+			out.WriteString(line)
+		}
+		out.WriteString("\x1b[J")
+		d.lines = next
+		return out.String()
+	}
+
+	coveredRows, forcedRows := d.writeScrollShift(&out, next)
+	rows := max(len(d.lines), len(next))
+	for i := 0; i < rows; i++ {
+		if coveredRows[i] {
+			continue
+		}
+		oldLine := ""
+		if i < len(d.lines) {
+			oldLine = d.lines[i]
+		}
+		newLine := ""
+		if i < len(next) {
+			newLine = next[i]
+		}
+		if oldLine == newLine && !forcedRows[i] {
+			continue
+		}
+		writeMoveClear(&out, i+1)
+		out.WriteString(newLine)
+	}
+	d.lines = next
+	return out.String()
+}
+
+func writeMoveClear(out *strings.Builder, row int) {
+	out.WriteString("\x1b[")
+	out.WriteString(strconv.Itoa(row))
+	out.WriteString(";1H\x1b[2K")
+}
+
+type scrollShift struct {
+	runStart    int
+	runEnd      int
+	regionStart int
+	regionEnd   int
+	edgeRow     int
+	direction   int
+}
+
+func (d *frameDrawer) writeScrollShift(out *strings.Builder, next []string) ([]bool, []bool) {
+	rows := max(len(d.lines), len(next))
+	coveredRows := make([]bool, rows)
+	forcedRows := make([]bool, rows)
+	shift, ok := findScrollShift(d.lines, next)
+	if !ok {
+		return coveredRows, forcedRows
+	}
+
+	writeScrollRegion(out, shift)
+	for i := shift.runStart; i <= shift.runEnd; i++ {
+		coveredRows[i] = true
+	}
+	forcedRows[shift.edgeRow] = true
+	return coveredRows, forcedRows
+}
+
+func findScrollShift(oldLines, nextLines []string) (scrollShift, bool) {
+	if len(oldLines) != len(nextLines) {
+		return scrollShift{}, false
+	}
+	up := longestScrollShift(oldLines, nextLines, 1)
+	down := longestScrollShift(oldLines, nextLines, -1)
+	if down.runLength() > up.runLength() {
+		up = down
+	}
+	if up.runLength() < 3 {
+		return scrollShift{}, false
+	}
+	return up, true
+}
+
+func longestScrollShift(oldLines, nextLines []string, direction int) scrollShift {
+	bestStart := 0
+	bestLen := 0
+	currentStart := 0
+	currentLen := 0
+	for i := 0; i < len(nextLines); i++ {
+		oldIndex := i + direction
+		matches := oldIndex >= 0 && oldIndex < len(oldLines) && nextLines[i] == oldLines[oldIndex]
+		if matches {
+			if currentLen == 0 {
+				currentStart = i
+			}
+			currentLen++
+			if currentLen > bestLen {
+				bestStart = currentStart
+				bestLen = currentLen
+			}
+			continue
+		}
+		currentLen = 0
+	}
+	if bestLen == 0 {
+		return scrollShift{}
+	}
+
+	shift := scrollShift{runStart: bestStart, runEnd: bestStart + bestLen - 1, direction: direction}
+	if direction > 0 {
+		shift.regionStart = shift.runStart
+		shift.regionEnd = shift.runEnd + 1
+		shift.edgeRow = shift.regionEnd
+	} else {
+		shift.regionStart = shift.runStart - 1
+		shift.regionEnd = shift.runEnd
+		shift.edgeRow = shift.regionStart
+	}
+	if shift.regionStart < 0 || shift.regionEnd >= len(nextLines) {
+		return scrollShift{}
+	}
+	return shift
+}
+
+func (s scrollShift) runLength() int {
+	if s.direction == 0 || s.runEnd < s.runStart {
+		return 0
+	}
+	return s.runEnd - s.runStart + 1
+}
+
+func writeScrollRegion(out *strings.Builder, shift scrollShift) {
+	out.WriteString("\x1b[")
+	out.WriteString(strconv.Itoa(shift.regionStart + 1))
+	out.WriteString(";")
+	out.WriteString(strconv.Itoa(shift.regionEnd + 1))
+	out.WriteString("r\x1b[")
+	out.WriteString(strconv.Itoa(shift.regionStart + 1))
+	out.WriteString(";1H")
+	if shift.direction > 0 {
+		out.WriteString("\x1b[S")
+	} else {
+		out.WriteString("\x1b[T")
+	}
+	out.WriteString("\x1b[r")
 }
 
 func stty(args ...string) (string, error) {

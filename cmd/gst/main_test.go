@@ -47,6 +47,53 @@ func TestEnqueueLatestStopsWhenContextIsDone(t *testing.T) {
 	}
 }
 
+func TestFrameDrawerOnlyWritesChangedLines(t *testing.T) {
+	drawer := frameDrawer{}
+	first := drawer.render("one\ntwo\nthree")
+	if !strings.Contains(first, "\x1b[H") || !strings.Contains(first, "one") || !strings.Contains(first, "three") {
+		t.Fatalf("initial draw should paint the whole frame: %q", first)
+	}
+
+	second := drawer.render("one\nTWO\nthree")
+	if !strings.Contains(second, "\x1b[2;1H\x1b[2KTWO") {
+		t.Fatalf("second draw should update only row 2: %q", second)
+	}
+	if strings.Contains(second, "one") || strings.Contains(second, "three") {
+		t.Fatalf("second draw repainted unchanged lines: %q", second)
+	}
+
+	unchanged := drawer.render("one\nTWO\nthree")
+	if unchanged != "" {
+		t.Fatalf("unchanged frame should not write terminal output: %q", unchanged)
+	}
+}
+
+func TestFrameDrawerClearsRemovedLines(t *testing.T) {
+	drawer := frameDrawer{}
+	_ = drawer.render("one\ntwo\nthree")
+
+	out := drawer.render("one")
+	if !strings.Contains(out, "\x1b[2;1H\x1b[2K") || !strings.Contains(out, "\x1b[3;1H\x1b[2K") {
+		t.Fatalf("shorter frame should clear removed rows: %q", out)
+	}
+}
+
+func TestFrameDrawerUsesScrollRegionForOneLineScroll(t *testing.T) {
+	drawer := frameDrawer{}
+	_ = drawer.render("title 1\nA\nB\nC\nD\nfooter")
+
+	out := drawer.render("title 2\nB\nC\nD\nE\nfooter")
+	if !strings.Contains(out, "\x1b[2;5r\x1b[2;1H\x1b[S\x1b[r") {
+		t.Fatalf("one-line scroll should use a terminal scroll region: %q", out)
+	}
+	if strings.Contains(out, "\x1b[2;1H\x1b[2KB") || strings.Contains(out, "\x1b[3;1H\x1b[2KC") || strings.Contains(out, "\x1b[4;1H\x1b[2KD") {
+		t.Fatalf("shifted rows should not be repainted after scroll region: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[1;1H\x1b[2Ktitle 2") || !strings.Contains(out, "\x1b[5;1H\x1b[2KE") {
+		t.Fatalf("scroll title and new edge row should be redrawn: %q", out)
+	}
+}
+
 func TestPrintOnceReturnsFailureOutsideGitRepo(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
