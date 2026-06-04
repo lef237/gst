@@ -65,6 +65,11 @@ Interactive controls:
   - `j`/`k`: one line
   - `d`/`u`: half a page
   - `f`/`b`: one page
+- Select and copy on-screen text with `v`: this toggles text selection mode,
+  which releases the mouse so you can drag-select text and copy it with your
+  terminal. The view freezes while selecting; press `v` again to resume mouse
+  tab switching. (Alternatively, without toggling, hold `Option` on macOS or
+  `Shift` on most Linux terminals while dragging to select.)
 - Refresh with `r`; quit with `q`.
 
 The current tab's available keys are always shown in the footer. The available

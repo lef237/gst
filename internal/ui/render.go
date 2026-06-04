@@ -19,6 +19,7 @@ type Options struct {
 	DiffStaged  bool
 	Scroll      int
 	Notice      string
+	Selecting   bool
 }
 
 type Tab int
@@ -392,6 +393,14 @@ func nativeStatusBar(opts Options) string {
 }
 
 func footerLines(active Tab, opts Options) []string {
+	if opts.Selecting {
+		items := []string{"drag to select text", "v:back", "q:quit"}
+		lines := wrapFooterItems("[select]", items, opts.Width)
+		for i, line := range lines {
+			lines[i] = color(opts, line, yellow)
+		}
+		return lines
+	}
 	lines := wrapFooterItems("[keys]", tabKeyItems(active, opts), opts.Width)
 	for i, line := range lines {
 		lines[i] = color(opts, line, dim)
@@ -413,33 +422,33 @@ func tabKeyItems(active Tab, opts Options) []string {
 	switch active {
 	case TabOverview:
 		if compact {
-			return []string{"left/right:tabs", "1-8", "t:native", "?", "r", "q"}
+			return []string{"left/right:tabs", "1-8", "t:native", "v", "?", "r", "q"}
 		}
-		return []string{"left/right:tabs", "1-8:jump", "t:native", "?:help", "r:refresh", "q:quit"}
+		return []string{"left/right:tabs", "1-8:jump", "t:native", "v:select", "?:help", "r:refresh", "q:quit"}
 	case TabGraph:
 		mode := "a --all"
 		if opts.GraphAll {
 			mode = "a normal"
 		}
 		if compact {
-			return []string{strings.ReplaceAll(mode, " ", ":"), "j/k", "d/u", "f/b", "left/right:tabs", "t:native", "?", "r", "q"}
+			return []string{strings.ReplaceAll(mode, " ", ":"), "j/k", "d/u", "f/b", "left/right:tabs", "t:native", "v", "?", "r", "q"}
 		}
-		return []string{strings.ReplaceAll(mode, " ", ":"), "j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "t:native", "?:help", "r:refresh", "q:quit"}
+		return []string{strings.ReplaceAll(mode, " ", ":"), "j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "t:native", "v:select", "?:help", "r:refresh", "q:quit"}
 	case TabDiff:
 		if compact {
-			return []string{"y:wt", "i:stg", "a:full", "s:toggle", "j/k", "d/u", "f/b", "left/right:tabs", "?", "r", "q"}
+			return []string{"y:wt", "i:stg", "a:full", "s:toggle", "j/k", "d/u", "f/b", "left/right:tabs", "v", "?", "r", "q"}
 		}
-		return []string{"y:copy-worktree", "i:copy-staged", "a:copy-full", "s:toggle", "j/k:line", "d/u:half", "f/b:page", "left/right:tabs", "?:help", "r:refresh", "q:quit"}
+		return []string{"y:copy-worktree", "i:copy-staged", "a:copy-full", "s:toggle", "j/k:line", "d/u:half", "f/b:page", "left/right:tabs", "v:select", "?:help", "r:refresh", "q:quit"}
 	case TabHelp:
 		if compact {
-			return []string{"j/k", "d/u", "f/b", "left/right", "1-8", "q"}
+			return []string{"j/k", "d/u", "f/b", "left/right", "1-8", "v", "q"}
 		}
-		return []string{"j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "1-8:jump", "q:quit"}
+		return []string{"j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "1-8:jump", "v:select", "q:quit"}
 	default:
 		if compact {
-			return []string{"j/k", "d/u", "f/b", "left/right:tabs", "t:native", "?", "r", "q"}
+			return []string{"j/k", "d/u", "f/b", "left/right:tabs", "t:native", "v", "?", "r", "q"}
 		}
-		return []string{"j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "t:native", "?:help", "r:refresh", "q:quit"}
+		return []string{"j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "t:native", "v:select", "?:help", "r:refresh", "q:quit"}
 	}
 }
 
@@ -1015,6 +1024,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"right     move to the next view",
 		"left      move to the previous view",
 		"mouse     click a tab label to switch views",
+		"v         toggle text selection mode; frees the cursor to drag-select & copy",
 		"q         quit",
 		"j/k       scroll graph and diff by one line",
 		"d/u       scroll graph and diff by half a page",

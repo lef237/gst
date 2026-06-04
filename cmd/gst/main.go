@@ -116,9 +116,10 @@ func run(args []string) int {
 	lastFrame := ""
 	forceDraw := true
 	notice := ""
+	selecting := false
 
 	for {
-		renderOpts := ui.Options{Color: color, Width: width, Height: height, Interactive: true, GraphAll: graphAll, DiffStaged: diffStaged, Scroll: scrolls[active], Notice: notice}
+		renderOpts := ui.Options{Color: color, Width: width, Height: height, Interactive: true, GraphAll: graphAll, DiffStaged: diffStaged, Scroll: scrolls[active], Notice: notice, Selecting: selecting}
 		frame := ""
 		if nativeStatus {
 			if (nativeRefreshPending || !nativeReady) && !nativeRefreshing {
@@ -173,7 +174,9 @@ func run(args []string) int {
 			}
 			state = result.state
 			stateReady = true
-			forceDraw = true
+			if !selecting {
+				forceDraw = true
+			}
 		case result := <-nativeRefreshes:
 			nativeRefreshing = false
 			if result.id != nativeRefreshID {
@@ -184,10 +187,25 @@ func run(args []string) int {
 			}
 			nativeOutput = result.output
 			nativeReady = true
-			forceDraw = true
+			if !selecting {
+				forceDraw = true
+			}
 		case key, ok := <-keys:
 			if !ok {
 				return 0
+			}
+			if selecting {
+				switch key {
+				case "v", "V":
+					selecting = false
+					setMouseCapture(true)
+					notice = "text selection off"
+					stateRefreshPending = true
+					forceDraw = true
+				case "q", "Q", "\x03":
+					return 0
+				}
+				continue
 			}
 			if notice != "" {
 				notice = ""
@@ -287,6 +305,11 @@ func run(args []string) int {
 					notice = copyDiff(ctx, state, copyStagedDiff)
 					forceDraw = true
 				}
+			case "v", "V":
+				selecting = true
+				setMouseCapture(false)
+				notice = "text selection on — drag to select & copy; press v to resume"
+				forceDraw = true
 			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 				next := ui.Tab(key[0] - '1')
 				if int(next) < len(ui.Tabs()) {
@@ -304,6 +327,9 @@ func run(args []string) int {
 				forceDraw = true
 			}
 		case <-ticker.C:
+			if selecting {
+				continue
+			}
 			if nativeStatus {
 				nativeRefreshPending = true
 			} else {
@@ -546,12 +572,23 @@ func enableCBreakMode() (func(), error) {
 	}, nil
 }
 
+const mouseCaptureOn = "\x1b[?1000h\x1b[?1006h"
+const mouseCaptureOff = "\x1b[?1006l\x1b[?1000l"
+
 func enterTUI() {
-	fmt.Print("\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[H")
+	fmt.Print("\x1b[?1049h\x1b[?25l" + mouseCaptureOn + "\x1b[H")
 }
 
 func leaveTUI() {
-	fmt.Print("\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l")
+	fmt.Print(mouseCaptureOff + "\x1b[?25h\x1b[?1049l")
+}
+
+func setMouseCapture(on bool) {
+	if on {
+		fmt.Print(mouseCaptureOn)
+	} else {
+		fmt.Print(mouseCaptureOff)
+	}
 }
 
 type frameDrawer struct {
