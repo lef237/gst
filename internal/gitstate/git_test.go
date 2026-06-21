@@ -303,6 +303,34 @@ func TestCollectHeadDiffIncludesUntrackedOnlyFiles(t *testing.T) {
 	}
 }
 
+func TestCollectWorktreeDiffIncludesUntrackedFiles(t *testing.T) {
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "tracked.txt")
+	runGit(t, root, "commit", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreeDiff := strings.Join(state.WorktreeDiff, "\n")
+	for _, want := range []string{"+changed", "diff --git a/untracked.txt b/untracked.txt", "new file mode", "+++ b/untracked.txt", "+new"} {
+		if !strings.Contains(worktreeDiff, want) {
+			t.Fatalf("worktree diff missing %q:\n%s", want, worktreeDiff)
+		}
+	}
+}
+
 func TestCollectHeadDiffOmitsUntrackedBinaryContents(t *testing.T) {
 	root := initTestRepo(t)
 	runGit(t, root, "config", "user.email", "a@example.com")

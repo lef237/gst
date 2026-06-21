@@ -67,7 +67,7 @@ Interactive controls:
   - `a` on the graph view: detailed `--all` graph
   - `s` on the diff view: worktree/staged diff
 - Copy diffs from the diff view:
-  - `y`: worktree diff
+  - `y`: worktree diff (includes untracked/new files)
   - `i`: staged/index diff
   - `a`: full text patch from `HEAD` to the worktree, including untracked files
     (binary file contents are omitted)

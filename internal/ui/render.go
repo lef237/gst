@@ -1031,7 +1031,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"f/b       scroll graph and diff by one page",
 		"page keys scroll graph and diff by one page",
 		"s         toggle staged/worktree diff on diff view",
-		"y         copy worktree diff on diff view",
+		"y         copy worktree diff (incl. new files) on diff view",
 		"i         copy staged/index diff on diff view",
 		"a         copy full text patch on diff view; binary contents omitted",
 		"          toggle --all on graph view",

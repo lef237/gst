@@ -244,26 +244,26 @@ func collectDiffs(ctx context.Context, root string) (string, string, string, err
 	if err != nil {
 		return "", "", "", err
 	}
-	worktree, err := git(ctx, root, "diff", "--no-ext-diff", "--unified=3")
+	tracked, err := git(ctx, root, "diff", "--no-ext-diff", "--unified=3")
 	if err != nil {
 		return "", "", "", err
 	}
+	untracked, err := collectUntrackedDiff(ctx, root)
+	if err != nil {
+		return "", "", "", err
+	}
+	// Untracked files are unstaged working-tree changes, so surface their
+	// contents alongside the tracked worktree diff. The worktree view and the
+	// y/worktree clipboard copy share this value, keeping them consistent.
+	worktree := joinRawDiffs(tracked, untracked)
 	hasHead, err := hasHeadCommit(ctx, root)
 	if err != nil {
 		return "", "", "", err
 	}
 	if !hasHead {
-		untracked, err := collectUntrackedDiff(ctx, root)
-		if err != nil {
-			return "", "", "", err
-		}
-		return cached, worktree, joinRawDiffs(cached, worktree, untracked), nil
+		return cached, worktree, joinRawDiffs(cached, tracked, untracked), nil
 	}
 	trackedHead, err := git(ctx, root, "diff", "HEAD", "--no-ext-diff", "--unified=3")
-	if err != nil {
-		return "", "", "", err
-	}
-	untracked, err := collectUntrackedDiff(ctx, root)
 	if err != nil {
 		return "", "", "", err
 	}
