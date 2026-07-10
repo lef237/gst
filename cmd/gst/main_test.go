@@ -128,6 +128,10 @@ func TestParseKeyDecodesArrowKeys(t *testing.T) {
 		{input: "\x1bOD", want: "left"},
 		{input: "\x1b[<0;39;2M", want: mouseKey(2, 39)},
 		{input: "\x1b[M" + string([]byte{32, 32 + 39, 32 + 2}), want: mouseKey(2, 39)},
+		{input: "\x1b[<64;39;2M", want: "wheelup"},
+		{input: "\x1b[<65;39;2M", want: "wheeldown"},
+		{input: "\x1b[M" + string([]byte{32 + 64, 32 + 39, 32 + 2}), want: "wheelup"},
+		{input: "\x1b[M" + string([]byte{32 + 65, 32 + 39, 32 + 2}), want: "wheeldown"},
 		{input: "q", want: "q"},
 	}
 
@@ -150,7 +154,7 @@ func TestParseKeyDecodesArrowKeys(t *testing.T) {
 func TestParseKeyIgnoresNonClickMouseSequences(t *testing.T) {
 	tests := []string{
 		"\x1b[<0;39;2m",
-		"\x1b[<64;39;2M",
+		"\x1b[<66;39;2M",
 		"\x1b[<32;39;2M",
 	}
 

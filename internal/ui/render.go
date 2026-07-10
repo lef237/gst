@@ -1023,7 +1023,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"tab       move to the next view",
 		"right     move to the next view",
 		"left      move to the previous view",
-		"mouse     click a tab label to switch views",
+		"mouse     click a tab label to switch views; wheel scrolls the view",
 		"v         toggle text selection mode; frees the cursor to drag-select & copy",
 		"q         quit",
 		"j/k       scroll graph and diff by one line",

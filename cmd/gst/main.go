@@ -238,6 +238,16 @@ func run(args []string) int {
 					scrolls[active] = max(0, scrolls[active]-1)
 					forceDraw = true
 				}
+			case "wheeldown":
+				if canScroll(active, nativeStatus) {
+					scrolls[active] += wheelStep
+					forceDraw = true
+				}
+			case "wheelup":
+				if canScroll(active, nativeStatus) {
+					scrolls[active] = max(0, scrolls[active]-wheelStep)
+					forceDraw = true
+				}
 			case "pagedown", "f", "F":
 				if canScroll(active, nativeStatus) {
 					scrolls[active] += pageStep(height)
@@ -499,6 +509,8 @@ func joinDiffSections(sections ...[]string) string {
 	}
 	return strings.Join(chunks, "\n\n") + "\n"
 }
+
+const wheelStep = 3
 
 func pageStep(height int) int {
 	return max(1, height-6)
@@ -940,7 +952,19 @@ func mousePressKey(button, row, col int) string {
 	if row <= 0 || col <= 0 {
 		return ""
 	}
-	if button&64 != 0 || button&32 != 0 || button&3 != 0 {
+	if button&32 != 0 {
+		return ""
+	}
+	if button&64 != 0 {
+		switch button & 3 {
+		case 0:
+			return "wheelup"
+		case 1:
+			return "wheeldown"
+		}
+		return ""
+	}
+	if button&3 != 0 {
 		return ""
 	}
 	return mouseKey(row, col)
