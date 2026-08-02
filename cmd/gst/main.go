@@ -296,7 +296,7 @@ func run(args []string) int {
 					stateRefreshPending = true
 					forceDraw = true
 				} else if active == ui.TabDiff && !nativeStatus {
-					notice = copyDiff(ctx, state, copyAllDiffs)
+					notice = deliverDiff(ctx, state, fullDiffTarget, key == "A")
 					forceDraw = true
 				}
 			case "s", "S":
@@ -307,12 +307,12 @@ func run(args []string) int {
 				}
 			case "y", "Y":
 				if active == ui.TabDiff && !nativeStatus {
-					notice = copyDiff(ctx, state, copyWorktreeDiff)
+					notice = deliverDiff(ctx, state, worktreeDiffTarget, key == "Y")
 					forceDraw = true
 				}
 			case "i", "I":
 				if active == ui.TabDiff && !nativeStatus {
-					notice = copyDiff(ctx, state, copyStagedDiff)
+					notice = deliverDiff(ctx, state, stagedDiffTarget, key == "I")
 					forceDraw = true
 				}
 			case "v", "V":
@@ -463,16 +463,36 @@ func tabClick(key string, active ui.Tab, nativeStatus, stateReady bool, width in
 	return ui.TabAtColumn(active, ui.Options{Width: width, Interactive: true}, col)
 }
 
-type diffCopyTarget int
+type diffTarget int
 
 const (
-	copyWorktreeDiff diffCopyTarget = iota
-	copyStagedDiff
-	copyAllDiffs
+	worktreeDiffTarget diffTarget = iota
+	stagedDiffTarget
+	fullDiffTarget
 )
 
-func copyDiff(ctx context.Context, state gitstate.State, target diffCopyTarget) string {
-	label, text := diffClipboardPayload(state, target)
+func (t diffTarget) slug() string {
+	switch t {
+	case stagedDiffTarget:
+		return "staged"
+	case fullDiffTarget:
+		return "full"
+	default:
+		return "worktree"
+	}
+}
+
+// deliverDiff routes a diff-view key to the clipboard or to a patch file. The
+// key's case is what decides: lowercase copies, uppercase writes.
+func deliverDiff(ctx context.Context, state gitstate.State, target diffTarget, toFile bool) string {
+	if toFile {
+		return savePatch(state, target)
+	}
+	return copyDiff(ctx, state, target)
+}
+
+func copyDiff(ctx context.Context, state gitstate.State, target diffTarget) string {
+	label, text := diffPayload(state, target)
 	if text == "" {
 		return "nothing to copy: " + label + " is empty"
 	}
@@ -485,11 +505,11 @@ func copyDiff(ctx context.Context, state gitstate.State, target diffCopyTarget) 
 	return "copied " + label
 }
 
-func diffClipboardPayload(state gitstate.State, target diffCopyTarget) (string, string) {
+func diffPayload(state gitstate.State, target diffTarget) (string, string) {
 	switch target {
-	case copyStagedDiff:
+	case stagedDiffTarget:
 		return "staged diff", joinDiffSections(state.StagedDiff)
-	case copyAllDiffs:
+	case fullDiffTarget:
 		return "full diff", joinDiffSections(state.HeadDiff)
 	default:
 		return "worktree diff", joinDiffSections(state.WorktreeDiff)

@@ -106,7 +106,7 @@ func TestRenderDiffTab(t *testing.T) {
 	}
 
 	out := RenderTab(state, TabDiff, Options{Width: 90, Height: 12, Interactive: true})
-	if !strings.Contains(out, "[2:diff]") || !strings.Contains(out, "mode: worktree diff") || !strings.Contains(out, "+newer") || !strings.Contains(out, "copy: y worktree") {
+	if !strings.Contains(out, "[2:diff]") || !strings.Contains(out, "mode: worktree diff") || !strings.Contains(out, "+newer") || !strings.Contains(out, "y/i/a copy, Y/I/A save") {
 		t.Fatalf("diff tab did not render worktree patch:\n%s", out)
 	}
 

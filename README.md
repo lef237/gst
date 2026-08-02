@@ -70,6 +70,12 @@ Interactive controls:
   - `y`: worktree diff (includes untracked/new files)
   - `i`: staged/index diff
   - `a`: full text patch from `HEAD` to the worktree, including untracked files
+- Save the same three diffs as a patch file with the uppercase keys `Y`, `I` and
+  `A`. The file is written to the directory `gst` was started from, named
+  `gst-<branch>-<target>-<YYYYMMDD-HHMMSS>.patch`, and an existing file is never
+  overwritten. Apply one with `git apply <file>`. Since `gst` counts untracked
+  files as worktree changes, a patch left in the repository shows up in the next
+  diff; add `*.patch` to `.gitignore` if that gets noisy
 - Changes `git apply` cannot replay are left out of every diff view and copy,
   and noted at the end of the patch, so a copied diff stays appliable with
   `git apply`:

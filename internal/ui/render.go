@@ -436,9 +436,9 @@ func tabKeyItems(active Tab, opts Options) []string {
 		return []string{strings.ReplaceAll(mode, " ", ":"), "j/k:line", "d/u:half", "f/b:page", "home/end:edge", "left/right:tabs", "t:native", "v:select", "?:help", "r:refresh", "q:quit"}
 	case TabDiff:
 		if compact {
-			return []string{"y:wt", "i:stg", "a:full", "s:toggle", "j/k", "d/u", "f/b", "left/right:tabs", "v", "?", "r", "q"}
+			return []string{"y:wt", "i:stg", "a:full", "Y/I/A:save", "s:toggle", "j/k", "d/u", "f/b", "left/right:tabs", "v", "?", "r", "q"}
 		}
-		return []string{"y:copy-worktree", "i:copy-staged", "a:copy-full", "s:toggle", "j/k:line", "d/u:half", "f/b:page", "left/right:tabs", "v:select", "?:help", "r:refresh", "q:quit"}
+		return []string{"y:copy-worktree", "i:copy-staged", "a:copy-full", "Y/I/A:save-patch", "s:toggle", "j/k:line", "d/u:half", "f/b:page", "left/right:tabs", "v:select", "?:help", "r:refresh", "q:quit"}
 	case TabHelp:
 		if compact {
 			return []string{"j/k", "d/u", "f/b", "left/right", "1-8", "v", "q"}
@@ -776,7 +776,7 @@ func diffLineAt(diff []string, mode, next string, width, index int, opts Options
 		line := color(opts, fmt.Sprintf("mode: %s diff", mode), cyanBold) + "  " + diffTogglePrompt(next, opts)
 		return truncate(line, width)
 	case 1:
-		return truncate(color(opts, "copy: y worktree, i staged, a full text patch; binary/submodule omitted", dim), width)
+		return truncate(color(opts, "y/i/a copy, Y/I/A save: worktree, staged, full patch; binary/submodule omitted", dim), width)
 	}
 	diffIndex := index - 2
 	if diffIndex < 0 || diffIndex >= len(diff) {
@@ -1035,6 +1035,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"i         copy staged/index diff on diff view",
 		"a         copy full text patch on diff view; binary/submodule omitted",
 		"          toggle --all on graph view",
+		"Y/I/A     save the same three diffs as a .patch file in the current dir",
 		"1-8       jump to a view directly",
 		"?         open this help view",
 		"t         toggle native git status",

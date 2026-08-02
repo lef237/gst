@@ -241,17 +241,17 @@ func TestDiffClipboardPayloads(t *testing.T) {
 		},
 	}
 
-	label, text := diffClipboardPayload(state, copyWorktreeDiff)
+	label, text := diffPayload(state, worktreeDiffTarget)
 	if label != "worktree diff" || text != "diff --git a/file.txt b/file.txt\n+worktree\n" {
 		t.Fatalf("worktree payload = %q, %q", label, text)
 	}
 
-	label, text = diffClipboardPayload(state, copyStagedDiff)
+	label, text = diffPayload(state, stagedDiffTarget)
 	if label != "staged diff" || text != "diff --git a/file.txt b/file.txt\n+staged\n" {
 		t.Fatalf("staged payload = %q, %q", label, text)
 	}
 
-	label, text = diffClipboardPayload(state, copyAllDiffs)
+	label, text = diffPayload(state, fullDiffTarget)
 	want := "diff --git a/file.txt b/file.txt\n+final\n"
 	if label != "full diff" || text != want {
 		t.Fatalf("all payload = %q, %q", label, text)
@@ -259,7 +259,7 @@ func TestDiffClipboardPayloads(t *testing.T) {
 }
 
 func TestDiffClipboardPayloadEmpty(t *testing.T) {
-	_, text := diffClipboardPayload(gitstate.State{}, copyAllDiffs)
+	_, text := diffPayload(gitstate.State{}, fullDiffTarget)
 	if text != "" {
 		t.Fatalf("empty all-diff payload = %q, want empty", text)
 	}
