@@ -349,13 +349,202 @@ func TestCollectHeadDiffOmitsUntrackedBinaryContents(t *testing.T) {
 		t.Fatal(err)
 	}
 	headDiff := strings.Join(state.HeadDiff, "\n")
-	if !strings.Contains(headDiff, "Binary files") {
-		t.Fatalf("head diff should mention omitted binary file contents:\n%s", headDiff)
+	if !strings.Contains(headDiff, "# binary file omitted: image.bin") {
+		t.Fatalf("head diff should note the omitted binary file:\n%s", headDiff)
 	}
-	for _, unwanted := range []string{"GIT binary patch", "literal "} {
+	for _, unwanted := range []string{"Binary files", "GIT binary patch", "literal ", "diff --git a/image.bin"} {
 		if strings.Contains(headDiff, unwanted) {
-			t.Fatalf("head diff should omit binary patch content %q:\n%s", unwanted, headDiff)
+			t.Fatalf("head diff should omit binary section %q:\n%s", unwanted, headDiff)
 		}
+	}
+}
+
+func TestCollectOmitsTrackedBinaryFilesFromEveryDiff(t *testing.T) {
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "text.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "image.bin"), []byte{0x00, 0x01, 0x02, 0xff}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "text.txt", "image.bin")
+	runGit(t, root, "commit", "-qm", "initial")
+	if err := os.WriteFile(filepath.Join(root, "image.bin"), []byte{0x00, 0x03, 0x04, 0xfe}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "image.bin")
+	if err := os.WriteFile(filepath.Join(root, "text.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, diff := range map[string][]string{
+		"staged":   state.StagedDiff,
+		"worktree": state.WorktreeDiff,
+		"head":     state.HeadDiff,
+	} {
+		text := strings.Join(diff, "\n")
+		if strings.Contains(text, "Binary files") || strings.Contains(text, "diff --git a/image.bin") {
+			t.Fatalf("%s diff still carries the binary section:\n%s", name, text)
+		}
+	}
+	staged := strings.Join(state.StagedDiff, "\n")
+	if !strings.Contains(staged, "# binary file omitted: image.bin") {
+		t.Fatalf("staged diff should note the omitted binary file:\n%s", staged)
+	}
+	worktree := strings.Join(state.WorktreeDiff, "\n")
+	if strings.Contains(worktree, "# binary file omitted") {
+		t.Fatalf("worktree diff has no binary change to note:\n%s", worktree)
+	}
+	if !strings.Contains(worktree, "+two") {
+		t.Fatalf("worktree diff lost its text change:\n%s", worktree)
+	}
+}
+
+func TestCollectKeepsHunklessTextSections(t *testing.T) {
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "mode.sh"), []byte("echo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "old.txt"), []byte("stable\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "mode.sh", "old.txt")
+	runGit(t, root, "commit", "-qm", "initial")
+	if err := os.Chmod(filepath.Join(root, "mode.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "mv", "old.txt", "new.txt")
+	if err := os.WriteFile(filepath.Join(root, "empty.txt"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "-A")
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := strings.Join(state.StagedDiff, "\n")
+	// None of these carry a hunk, so they must not be mistaken for binary.
+	for _, want := range []string{"new mode 100755", "rename to new.txt", "diff --git a/empty.txt b/empty.txt"} {
+		if !strings.Contains(staged, want) {
+			t.Fatalf("staged diff dropped hunkless section %q:\n%s", want, staged)
+		}
+	}
+	if strings.Contains(staged, "# binary file omitted") {
+		t.Fatalf("staged diff has no binary change to note:\n%s", staged)
+	}
+}
+
+func TestCollectDiffsApplyCleanly(t *testing.T) {
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	// Config a user might plausibly have set, each of which reshapes diff
+	// output into something git apply would reject.
+	runGit(t, root, "config", "color.ui", "always")
+	runGit(t, root, "config", "diff.mnemonicPrefix", "true")
+	runGit(t, root, "config", "diff.noprefix", "true")
+	runGit(t, root, "config", "core.autocrlf", "true")
+	if err := os.WriteFile(filepath.Join(root, "text.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "image.bin"), []byte{0x00, 0x01, 0x02, 0xff}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-qm", "initial")
+	if err := os.WriteFile(filepath.Join(root, "text.txt"), []byte("one\nTWO\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "image.bin"), []byte{0x00, 0x03, 0x04, 0xfe}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "added.txt"), []byte("fresh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := strings.Join(state.HeadDiff, "\n") + "\n"
+	if strings.Contains(patch, "\x1b[") {
+		t.Fatalf("patch carries ANSI color escapes:\n%q", patch)
+	}
+	if strings.Contains(patch, "warning:") {
+		t.Fatalf("patch carries a git warning from stderr:\n%s", patch)
+	}
+	if !strings.Contains(patch, "--- a/text.txt") || !strings.Contains(patch, "+++ b/text.txt") {
+		t.Fatalf("patch does not use a/ and b/ prefixes:\n%s", patch)
+	}
+
+	// Apply into a clone of the base commit; the untracked file must not
+	// already exist there or git apply would reject it as a duplicate.
+	target := initTestRepo(t)
+	runGit(t, target, "config", "user.email", "a@example.com")
+	runGit(t, target, "config", "user.name", "a")
+	runGit(t, target, "fetch", "-q", root, "HEAD")
+	runGit(t, target, "checkout", "-q", "FETCH_HEAD")
+
+	patchFile := filepath.Join(t.TempDir(), "gst.patch")
+	if err := os.WriteFile(patchFile, []byte(patch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "apply", "--check", patchFile)
+	cmd.Dir = target
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git apply --check rejected the yanked diff: %v\n%s\n--- patch ---\n%s", err, out, patch)
+	}
+}
+
+func TestStripBinaryDiffsKeepsTextSections(t *testing.T) {
+	raw := strings.Join([]string{
+		"diff --git a/image.png b/image.png",
+		"index 20f982d..df1cf1d 100644",
+		"Binary files a/image.png and b/image.png differ",
+		"diff --git a/text.txt b/text.txt",
+		"index b77b4eb..7061c57 100644",
+		"--- a/text.txt",
+		"+++ b/text.txt",
+		"@@ -1,2 +1,2 @@",
+		" x",
+		"-y",
+		"+Y",
+		"diff --git a/added.bin b/added.bin",
+		"new file mode 100644",
+		"index 0000000..1939cfc",
+		"Binary files /dev/null and b/added.bin differ",
+		"diff --git a/gone.bin b/gone.bin",
+		"deleted file mode 100644",
+		"index 1939cfc..0000000",
+		"Binary files a/gone.bin and /dev/null differ",
+		"",
+	}, "\n")
+
+	text, binary := stripBinaryDiffs(raw)
+
+	want := []string{"image.png", "added.bin", "gone.bin"}
+	if len(binary) != len(want) {
+		t.Fatalf("binary paths mismatch: %#v", binary)
+	}
+	for i, path := range want {
+		if binary[i] != path {
+			t.Fatalf("binary path %d: got %q want %q", i, binary[i], path)
+		}
+	}
+	if strings.Contains(text, "Binary files") {
+		t.Fatalf("binary sections survived:\n%s", text)
+	}
+	if !strings.Contains(text, "+Y") || !strings.Contains(text, "diff --git a/text.txt b/text.txt") {
+		t.Fatalf("text section was dropped:\n%s", text)
 	}
 }
 

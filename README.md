@@ -70,7 +70,9 @@ Interactive controls:
   - `y`: worktree diff (includes untracked/new files)
   - `i`: staged/index diff
   - `a`: full text patch from `HEAD` to the worktree, including untracked files
-    (binary file contents are omitted)
+- Binary files are left out of every diff view and copy, and noted at the end of
+  the patch as `# binary file omitted: <path>`, so a copied diff stays appliable
+  with `git apply`
 - Scroll graph, diff, and long list views with less-like keys:
   - `j`/`k`: one line
   - `d`/`u`: half a page
