@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -582,6 +583,55 @@ func TestCollectEmptyRepoDoesNotWarnAboutMissingHead(t *testing.T) {
 	}
 	if len(state.Warnings) != 0 {
 		t.Fatalf("empty repo should not warn: %#v", state.Warnings)
+	}
+}
+
+// TestCollectEmptyRepoWithLocalizedGit pins the empty-repo path to git's exit
+// code rather than to its wording. git translates "Needed a single revision",
+// so on a machine whose git ships the matching message catalog a repository
+// without commits must still collect cleanly instead of failing and leaving
+// every diff empty. A shim standing in for a localized git keeps the test
+// deterministic on hosts that have no translations installed.
+func TestCollectEmptyRepoWithLocalizedGit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the git shim needs a POSIX shell")
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skipf("git not found: %v", err)
+	}
+	root := initTestRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "new.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	shimDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"err=$(mktemp)\n" +
+		"'" + realGit + "' \"$@\" 2>\"$err\"\n" +
+		"status=$?\n" +
+		"sed -e 's/Needed a single revision/Behovde ensam revision/' -e 's/^fatal:/odesdigert:/' \"$err\" >&2\n" +
+		"rm -f \"$err\"\n" +
+		"exit $status\n"
+	if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Warnings) != 0 {
+		t.Fatalf("localized git should not warn on an empty repo: %#v", state.Warnings)
+	}
+	if len(state.Graph) != 0 {
+		t.Fatalf("empty repo should not have graph lines: %#v", state.Graph)
+	}
+	for name, diff := range map[string][]string{"worktree": state.WorktreeDiff, "head": state.HeadDiff} {
+		if !strings.Contains(strings.Join(diff, "\n"), "+hello") {
+			t.Fatalf("%s diff lost the untracked file: %#v", name, diff)
+		}
 	}
 }
 

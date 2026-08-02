@@ -226,18 +226,19 @@ func collectGraph(ctx context.Context, root string, limit int, all bool) (string
 	return git(ctx, root, args...)
 }
 
+// hasHeadCommit reports whether the repository has a commit at HEAD. --quiet
+// turns an unresolvable HEAD into a silent exit 1 instead of a "Needed a single
+// revision" fatal, so the answer never depends on git's message catalog: that
+// string is translated, and matching it would make a repository without commits
+// look like a hard failure under any locale git ships a translation for. Only
+// exit 1 counts as "no commit" -- a missing repository or a broken object store
+// exits 128 and still surfaces as an error.
 func hasHeadCommit(ctx context.Context, root string) (bool, error) {
-	_, err := git(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
-	if err == nil {
-		return true, nil
+	out, err := gitWithAllowedExitCodes(ctx, root, []int{1}, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	if err != nil {
+		return false, err
 	}
-	if ctx.Err() != nil {
-		return false, ctx.Err()
-	}
-	if strings.Contains(err.Error(), "Needed a single revision") {
-		return false, nil
-	}
-	return false, err
+	return strings.TrimSpace(out) != "", nil
 }
 
 // diffFlags pin the shape of every diff gst collects so the result stays a
