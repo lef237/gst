@@ -530,15 +530,15 @@ func TestStripBinaryDiffsKeepsTextSections(t *testing.T) {
 		"",
 	}, "\n")
 
-	text, binary := stripBinaryDiffs(raw)
+	text, dropped := stripUnappliableSections(raw)
 
 	want := []string{"image.png", "added.bin", "gone.bin"}
-	if len(binary) != len(want) {
-		t.Fatalf("binary paths mismatch: %#v", binary)
+	if len(dropped.binary) != len(want) {
+		t.Fatalf("binary paths mismatch: %#v", dropped.binary)
 	}
 	for i, path := range want {
-		if binary[i] != path {
-			t.Fatalf("binary path %d: got %q want %q", i, binary[i], path)
+		if dropped.binary[i] != path {
+			t.Fatalf("binary path %d: got %q want %q", i, dropped.binary[i], path)
 		}
 	}
 	if strings.Contains(text, "Binary files") {
@@ -546,6 +546,145 @@ func TestStripBinaryDiffsKeepsTextSections(t *testing.T) {
 	}
 	if !strings.Contains(text, "+Y") || !strings.Contains(text, "diff --git a/text.txt b/text.txt") {
 		t.Fatalf("text section was dropped:\n%s", text)
+	}
+}
+
+func TestStripUnappliableSectionsDropsSubmodulePointers(t *testing.T) {
+	raw := strings.Join([]string{
+		"diff --git a/changed b/changed",
+		"index b4d3c5f..cecbc06 160000",
+		"--- a/changed",
+		"+++ b/changed",
+		"@@ -1 +1 @@",
+		"-Subproject commit b4d3c5f9f0a7e423be03d7aed5c22a493ab14e49",
+		"+Subproject commit cecbc06b7b45deb1763d03121916404c27ec2f53",
+		"diff --git a/added b/added",
+		"new file mode 160000",
+		"index 0000000..ebebe33",
+		"--- /dev/null",
+		"+++ b/added",
+		"@@ -0,0 +1 @@",
+		"+Subproject commit ebebe337847a719153d8149f315a67845d221f21",
+		"diff --git a/gone b/gone",
+		"deleted file mode 160000",
+		"index ebebe33..0000000",
+		"--- a/gone",
+		"+++ /dev/null",
+		"@@ -1 +0,0 @@",
+		"-Subproject commit ebebe337847a719153d8149f315a67845d221f21",
+		// A plain text file may quote a gitlink hunk verbatim, so the hunk body
+		// alone must never be taken as proof of a submodule.
+		"diff --git a/docs.md b/docs.md",
+		"index b77b4eb..7061c57 100644",
+		"--- a/docs.md",
+		"+++ b/docs.md",
+		"@@ -1,2 +1,2 @@",
+		" A submodule hunk reads like this:",
+		"-Subproject commit 1111111111111111111111111111111111111111",
+		"+Subproject commit 2222222222222222222222222222222222222222",
+		"",
+	}, "\n")
+
+	text, dropped := stripUnappliableSections(raw)
+
+	want := []string{"changed", "added", "gone"}
+	if len(dropped.submodule) != len(want) {
+		t.Fatalf("submodule paths mismatch: %#v", dropped.submodule)
+	}
+	for i, path := range want {
+		if dropped.submodule[i] != path {
+			t.Fatalf("submodule path %d: got %q want %q", i, dropped.submodule[i], path)
+		}
+	}
+	if strings.Contains(text, "160000") {
+		t.Fatalf("submodule sections survived:\n%s", text)
+	}
+	if !strings.Contains(text, "diff --git a/docs.md b/docs.md") || !strings.Contains(text, "+Subproject commit 2222222") {
+		t.Fatalf("text section quoting a gitlink hunk was dropped:\n%s", text)
+	}
+}
+
+// TestCollectDiffsWithSubmoduleApplyCleanly covers the whole path from a real
+// submodule to the clipboard: the pointer section must be gone, the note must
+// name it, and the surviving text change must still apply where the submodule
+// was never checked out.
+func TestCollectDiffsWithSubmoduleApplyCleanly(t *testing.T) {
+	lib := initTestRepo(t)
+	runGit(t, lib, "config", "user.email", "a@example.com")
+	runGit(t, lib, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(lib, "lib.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, lib, "add", "-A")
+	runGit(t, lib, "commit", "-qm", "v1")
+	if err := os.WriteFile(filepath.Join(lib, "lib.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, lib, "add", "-A")
+	runGit(t, lib, "commit", "-qm", "v2")
+
+	root := initTestRepo(t)
+	runGit(t, root, "config", "user.email", "a@example.com")
+	runGit(t, root, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-qm", "initial")
+	// Local paths need the protocol allowance git 2.38.1 added for CVE-2022-39253.
+	runGit(t, root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "lib")
+	runGit(t, root, "commit", "-qm", "add submodule")
+
+	// Move the pointer back a commit and leave uncommitted work inside the
+	// submodule, which is what makes git append the invalid "-dirty" suffix.
+	runGit(t, filepath.Join(root, "lib"), "checkout", "-q", "HEAD~1")
+	if err := os.WriteFile(filepath.Join(root, "lib", "lib.txt"), []byte("uncommitted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hello\nworld\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Collect(context.Background(), root, Options{LogLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, diff := range map[string][]string{"worktree": state.WorktreeDiff, "head": state.HeadDiff} {
+		patch := strings.Join(diff, "\n") + "\n"
+		if strings.Contains(patch, "Subproject commit") || strings.Contains(patch, "160000") {
+			t.Fatalf("%s diff still carries the submodule pointer:\n%s", name, patch)
+		}
+		if strings.Contains(patch, "-dirty") {
+			t.Fatalf("%s diff carries a -dirty pseudo commit:\n%s", name, patch)
+		}
+		if !strings.Contains(patch, "# submodule change omitted: lib") {
+			t.Fatalf("%s diff does not note the dropped submodule:\n%s", name, patch)
+		}
+		if !strings.Contains(patch, "+world") {
+			t.Fatalf("%s diff lost the text change:\n%s", name, patch)
+		}
+	}
+
+	// Apply where the submodule path does not exist at all. git apply is
+	// all-or-nothing, so an surviving gitlink section would take the README
+	// change down with it.
+	target := initTestRepo(t)
+	runGit(t, target, "config", "user.email", "a@example.com")
+	runGit(t, target, "config", "user.name", "a")
+	if err := os.WriteFile(filepath.Join(target, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, target, "add", "-A")
+	runGit(t, target, "commit", "-qm", "initial")
+
+	patchFile := filepath.Join(t.TempDir(), "gst.patch")
+	if err := os.WriteFile(patchFile, []byte(strings.Join(state.HeadDiff, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "apply", "--check", patchFile)
+	cmd.Dir = target
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git apply --check rejected the yanked diff: %v\n%s", err, out)
 	}
 }
 

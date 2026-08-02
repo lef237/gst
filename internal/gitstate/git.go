@@ -246,12 +246,18 @@ func hasHeadCommit(ctx context.Context, root string) (bool, error) {
 // diff.noprefix, diff.mnemonicPrefix or color.ui=always would otherwise
 // reshape the headers, and --no-textconv stops a textconv driver from
 // substituting converted text for the file's real content (--no-ext-diff alone
-// does not cover it). --binary is deliberately absent: binary files are
-// dropped by stripBinaryDiffs rather than embedded.
+// does not cover it). --ignore-submodules=dirty suppresses the "-dirty" suffix
+// git appends to a submodule's commit when the submodule has uncommitted work,
+// which is not a valid object id: git apply --check accepts such a section and
+// then applying it only warns and leaves the gitlink untouched. --binary is
+// deliberately absent: binary files are dropped by stripUnappliableSections
+// rather than embedded, and so are the submodule sections that survive the
+// flag.
 var diffFlags = []string{
 	"--no-ext-diff",
 	"--no-textconv",
 	"--no-color",
+	"--ignore-submodules=dirty",
 	"--src-prefix=a/",
 	"--dst-prefix=b/",
 	"--unified=3",
@@ -262,67 +268,67 @@ func diffArgs(args ...string) []string {
 }
 
 func collectDiffs(ctx context.Context, root string) (string, string, string, error) {
-	cached, cachedBinary, err := collectDiff(ctx, root, "diff", "--cached")
+	cached, cachedDropped, err := collectDiff(ctx, root, "diff", "--cached")
 	if err != nil {
 		return "", "", "", err
 	}
-	tracked, trackedBinary, err := collectDiff(ctx, root, "diff")
+	tracked, trackedDropped, err := collectDiff(ctx, root, "diff")
 	if err != nil {
 		return "", "", "", err
 	}
-	untracked, untrackedBinary, err := collectUntrackedDiff(ctx, root)
+	untracked, untrackedDropped, err := collectUntrackedDiff(ctx, root)
 	if err != nil {
 		return "", "", "", err
 	}
-	staged := noteBinaryFiles(joinRawDiffs(cached), cachedBinary)
+	staged := noteOmitted(joinRawDiffs(cached), cachedDropped)
 	// Untracked files are unstaged working-tree changes, so surface their
 	// contents alongside the tracked worktree diff. The worktree view and the
 	// y/worktree clipboard copy share this value, keeping them consistent.
-	worktree := noteBinaryFiles(joinRawDiffs(tracked, untracked), trackedBinary, untrackedBinary)
+	worktree := noteOmitted(joinRawDiffs(tracked, untracked), trackedDropped, untrackedDropped)
 	hasHead, err := hasHeadCommit(ctx, root)
 	if err != nil {
 		return "", "", "", err
 	}
 	if !hasHead {
-		head := noteBinaryFiles(joinRawDiffs(cached, tracked, untracked), cachedBinary, trackedBinary, untrackedBinary)
+		head := noteOmitted(joinRawDiffs(cached, tracked, untracked), cachedDropped, trackedDropped, untrackedDropped)
 		return staged, worktree, head, nil
 	}
-	trackedHead, headBinary, err := collectDiff(ctx, root, "diff", "HEAD")
+	trackedHead, headDropped, err := collectDiff(ctx, root, "diff", "HEAD")
 	if err != nil {
 		return "", "", "", err
 	}
-	head := noteBinaryFiles(joinRawDiffs(trackedHead, untracked), headBinary, untrackedBinary)
+	head := noteOmitted(joinRawDiffs(trackedHead, untracked), headDropped, untrackedDropped)
 	return staged, worktree, head, nil
 }
 
-func collectDiff(ctx context.Context, root string, args ...string) (string, []string, error) {
+func collectDiff(ctx context.Context, root string, args ...string) (string, omitted, error) {
 	out, err := git(ctx, root, diffArgs(args...)...)
 	if err != nil {
-		return "", nil, err
+		return "", omitted{}, err
 	}
-	text, binary := stripBinaryDiffs(out)
-	return text, binary, nil
+	text, dropped := stripUnappliableSections(out)
+	return text, dropped, nil
 }
 
-func collectUntrackedDiff(ctx context.Context, root string) (string, []string, error) {
+func collectUntrackedDiff(ctx context.Context, root string) (string, omitted, error) {
 	out, err := git(ctx, root, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
-		return "", nil, err
+		return "", omitted{}, err
 	}
 
 	var diffs []string
-	var binary []string
+	var dropped omitted
 	for _, path := range nulSeparated(out) {
 		args := append(diffArgs("diff", "--no-index"), "--", "/dev/null", path)
 		diff, err := gitWithAllowedExitCodes(ctx, root, []int{1}, args...)
 		if err != nil {
-			return "", nil, err
+			return "", omitted{}, err
 		}
-		text, omitted := stripBinaryDiffs(diff)
+		text, sectionDropped := stripUnappliableSections(diff)
 		diffs = append(diffs, text)
-		binary = append(binary, omitted...)
+		dropped = mergeOmitted(dropped, sectionDropped)
 	}
-	return joinRawDiffs(diffs...), binary, nil
+	return joinRawDiffs(diffs...), dropped, nil
 }
 
 func NativeStatus(ctx context.Context, dir string, color bool) (string, error) {
@@ -738,31 +744,62 @@ func diffLines(out string) []string {
 }
 
 const (
-	binaryNotePrefix   = "# binary file omitted: "
-	binaryMarkerPrefix = "Binary files "
-	binaryMarkerSuffix = " differ"
-	binaryPatchMarker  = "GIT binary patch"
-	diffHeaderPrefix   = "diff --git "
+	binaryNotePrefix    = "# binary file omitted: "
+	submoduleNotePrefix = "# submodule change omitted: "
+	binaryMarkerPrefix  = "Binary files "
+	binaryMarkerSuffix  = " differ"
+	binaryPatchMarker   = "GIT binary patch"
+	diffHeaderPrefix    = "diff --git "
+	hunkHeaderPrefix    = "@@"
+	gitlinkMode         = "160000"
 )
 
-// stripBinaryDiffs drops the file sections git could not express as text. Such
-// a section carries no hunk, only a "Binary files ... differ" line, and git
-// apply rejects the entire patch over it. The dropped paths come back so the
-// caller can name them once the surviving sections have been joined.
-func stripBinaryDiffs(raw string) (string, []string) {
+// omitted groups the file sections a diff had to drop by the reason they were
+// dropped, so each group can be named in its own words once the surviving
+// sections have been joined.
+type omitted struct {
+	binary    []string
+	submodule []string
+}
+
+func (o omitted) empty() bool {
+	return len(o.binary) == 0 && len(o.submodule) == 0
+}
+
+func mergeOmitted(groups ...omitted) omitted {
+	var all omitted
+	for _, group := range groups {
+		all.binary = append(all.binary, group.binary...)
+		all.submodule = append(all.submodule, group.submodule...)
+	}
+	return all
+}
+
+// stripUnappliableSections drops the file sections git apply cannot replay into
+// a plain working tree, either of which would sink the whole patch since git
+// apply is all-or-nothing. Binary content is one: such a section carries no
+// hunk, only a "Binary files ... differ" line. A submodule pointer is the
+// other: its hunk reads as ordinary text but names a commit in a repository the
+// patch does not carry, so applying it fails outright where the submodule is
+// not checked out and silently does nothing where it is only uninitialized.
+func stripUnappliableSections(raw string) (string, omitted) {
 	if raw == "" {
-		return "", nil
+		return "", omitted{}
 	}
 	var kept strings.Builder
-	var binary []string
+	var dropped omitted
 	for _, section := range diffSections(raw) {
 		if path, ok := binarySection(section); ok {
-			binary = append(binary, path)
+			dropped.binary = append(dropped.binary, path)
+			continue
+		}
+		if submoduleSection(section) {
+			dropped.submodule = append(dropped.submodule, headerPath(firstLine(section)))
 			continue
 		}
 		kept.WriteString(section)
 	}
-	return kept.String(), binary
+	return kept.String(), dropped
 }
 
 // diffSections splits a diff into one chunk per file. Each chunk keeps its own
@@ -803,6 +840,28 @@ func binarySection(section string) (string, bool) {
 	return "", false
 }
 
+// submoduleSection reports whether a file section changes a submodule pointer.
+// The gitlink mode on a header line is what identifies it: the "Subproject
+// commit" hunk body cannot be trusted on its own, since an ordinary text file
+// documenting submodules may carry that very line. Scanning stops at the first
+// hunk header so no hunk content is ever read as a header.
+func submoduleSection(section string) bool {
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, hunkHeaderPrefix) {
+			return false
+		}
+		if !strings.HasSuffix(line, " "+gitlinkMode) {
+			continue
+		}
+		for _, prefix := range []string{"index ", "new file mode ", "deleted file mode ", "old mode ", "new mode "} {
+			if strings.HasPrefix(line, prefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // binaryPath reads the file name out of "Binary files a/x and b/x differ". The
 // post-image side is preferred so an added file reads naturally, and a deleted
 // one falls back to the pre-image. A path containing " and b/" could fool this,
@@ -818,6 +877,14 @@ func binaryPath(marker, header string) string {
 	return headerPath(header)
 }
 
+// firstLine returns a section's "diff --git" header line.
+func firstLine(section string) string {
+	if idx := strings.IndexByte(section, '\n'); idx >= 0 {
+		return section[:idx]
+	}
+	return section
+}
+
 // headerPath recovers the post-image path from a "diff --git a/x b/x" line.
 func headerPath(header string) string {
 	rest := strings.TrimPrefix(header, diffHeaderPrefix)
@@ -827,15 +894,12 @@ func headerPath(header string) string {
 	return strings.TrimPrefix(rest, "a/")
 }
 
-// noteBinaryFiles records the files stripBinaryDiffs removed. The notes go
+// noteOmitted records the files stripUnappliableSections removed. The notes go
 // after the last hunk: git apply skips trailing text, whereas a note wedged
 // between hunks would be read as hunk content and corrupt the patch.
-func noteBinaryFiles(diff string, groups ...[]string) string {
-	var paths []string
-	for _, group := range groups {
-		paths = append(paths, group...)
-	}
-	if len(paths) == 0 {
+func noteOmitted(diff string, groups ...omitted) string {
+	all := mergeOmitted(groups...)
+	if all.empty() {
 		return diff
 	}
 	var b strings.Builder
@@ -843,8 +907,13 @@ func noteBinaryFiles(diff string, groups ...[]string) string {
 	if diff != "" {
 		b.WriteString("\n")
 	}
-	for _, path := range paths {
+	for _, path := range all.binary {
 		b.WriteString(binaryNotePrefix)
+		b.WriteString(path)
+		b.WriteString("\n")
+	}
+	for _, path := range all.submodule {
+		b.WriteString(submoduleNotePrefix)
 		b.WriteString(path)
 		b.WriteString("\n")
 	}

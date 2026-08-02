@@ -776,7 +776,7 @@ func diffLineAt(diff []string, mode, next string, width, index int, opts Options
 		line := color(opts, fmt.Sprintf("mode: %s diff", mode), cyanBold) + "  " + diffTogglePrompt(next, opts)
 		return truncate(line, width)
 	case 1:
-		return color(opts, "copy: y worktree, i staged, a full text patch; binary omitted", dim)
+		return truncate(color(opts, "copy: y worktree, i staged, a full text patch; binary/submodule omitted", dim), width)
 	}
 	diffIndex := index - 2
 	if diffIndex < 0 || diffIndex >= len(diff) {
@@ -1033,7 +1033,7 @@ func helpLines(state gitstate.State, width int, opts Options) []string {
 		"s         toggle staged/worktree diff on diff view",
 		"y         copy worktree diff (incl. new files) on diff view",
 		"i         copy staged/index diff on diff view",
-		"a         copy full text patch on diff view; binary contents omitted",
+		"a         copy full text patch on diff view; binary/submodule omitted",
 		"          toggle --all on graph view",
 		"1-8       jump to a view directly",
 		"?         open this help view",
